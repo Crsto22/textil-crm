@@ -4,10 +4,9 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import Autoplay from "embla-carousel-autoplay";
-import { ViewColumnsIcon } from "@heroicons/react/24/solid";
 import { toast } from "sonner";
-
 import { ThemeToggle } from "@/components/theme-toggle";
+import { KimentsCrmLogo } from "@/components/KimentsCrmLogo";
 import { Button } from "@/components/ui/button";
 import {
   Carousel,
@@ -16,15 +15,15 @@ import {
 } from "@/components/ui/carousel";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { getStoredSession, saveSession } from "@/lib/auth/session";
+import { useAuth } from "@/lib/auth/auth-context";
 
 export function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const { isAuthenticated, isLoading: isAuthLoading, login } = useAuth();
   const router = useRouter();
 
-  const companyName = "Kiments CRM";
   const systemVersion = "v1.0.0";
   const carouselImages = [
     "https://images.unsplash.com/photo-1445205170230-053b83016050?w=1200&q=80",
@@ -33,36 +32,47 @@ export function Login() {
   ];
 
   useEffect(() => {
-    if (getStoredSession()) {
+    if (!isAuthLoading && isAuthenticated) {
       router.replace("/chat");
     }
-  }, [router]);
+  }, [isAuthLoading, isAuthenticated, router]);
+
+  useEffect(() => {
+    try {
+      if (window.sessionStorage.getItem("auth:session-expired") === "1") {
+        window.sessionStorage.removeItem("auth:session-expired");
+        toast.warning("Tu sesion expiro. Vuelve a iniciar sesion.");
+      }
+      if (window.sessionStorage.getItem("auth:crm-access-denied") === "1") {
+        window.sessionStorage.removeItem("auth:crm-access-denied");
+        toast.error("No tienes acceso al CRM");
+      }
+    } catch {
+      // sessionStorage puede no estar disponible
+    }
+  }, []);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setIsLoading(true);
 
-    try {
-      saveSession(email.trim());
+    const result = await login({ email: email.trim(), password });
+
+    if (result.ok) {
       toast.success("Sesion iniciada correctamente");
       router.push("/chat");
-    } catch {
-      toast.error("Error al iniciar sesion");
-    } finally {
-      setIsLoading(false);
+    } else {
+      toast.error(result.message ?? "Error al iniciar sesion");
     }
+
+    setIsLoading(false);
   };
 
   return (
     <div className="grid min-h-screen lg:grid-cols-2">
       <div className="flex flex-col gap-4 p-6 md:p-10">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="flex h-6 w-6 items-center justify-center rounded-md">
-              <ViewColumnsIcon className="size-4" />
-            </div>
-            <h1 className="font-medium">{companyName}</h1>
-          </div>
+          <KimentsCrmLogo size="sm" />
           <ThemeToggle />
         </div>
 
@@ -70,13 +80,9 @@ export function Login() {
           <div className="w-full max-w-xs">
             <form onSubmit={handleSubmit} className="flex flex-col gap-6">
               <div className="flex flex-col items-center gap-2 text-center">
-                <div className="mb-1 flex items-center justify-center rounded-2xl">
-                  <ViewColumnsIcon className="size-8 text-primary" />
+                <div className="mb-1">
+                  <KimentsCrmLogo size="lg" />
                 </div>
-                <h1 className="text-2xl font-bold">Inicia sesion en tu cuenta</h1>
-                <p className="text-balance text-sm text-muted-foreground">
-                  Ingresa tu email para acceder a {companyName}
-                </p>
               </div>
 
               <div className="grid gap-6">
@@ -105,8 +111,8 @@ export function Login() {
                   />
                 </div>
 
-                <Button type="submit" className="w-full" disabled={isLoading}>
-                  {isLoading ? (
+                <Button type="submit" className="w-full" disabled={isLoading || isAuthLoading}>
+                  {isLoading || isAuthLoading ? (
                     <span className="flex items-center gap-2">
                       <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
                       Iniciando sesion...

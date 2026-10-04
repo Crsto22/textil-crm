@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
+import { AuthProvider } from "@/lib/auth/auth-context";
+import { ServiceWorkerRegistrar } from "@/components/pwa/ServiceWorkerRegistrar";
 import { Toaster } from "sonner";
 
 const soraLight = localFont({
@@ -21,6 +23,12 @@ const soraLight = localFont({
   display: "swap",
 });
 
+const kiments = localFont({
+  src: "../public/font/logo/jen-wagner-co-versailles-regular.ttf",
+  variable: "--font-kiments",
+  weight: "400",
+});
+
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
@@ -35,6 +43,29 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   title: "Kiments CRM",
   description: "CRM textil para conversaciones, contactos y reportes",
+  applicationName: "Kiments CRM",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Kiments",
+  },
+  formatDetection: {
+    telephone: false,
+  },
+  icons: {
+    icon: [
+      { url: "/pwa/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/pwa/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [
+      {
+        url: "/pwa/apple-icon-180.png",
+        sizes: "180x180",
+        type: "image/png",
+      },
+    ],
+  },
 };
 
 export default function RootLayout({
@@ -44,15 +75,18 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="es" suppressHydrationWarning>
-      <body className={`${soraLight.variable} antialiased`}>
+      <body className={`${soraLight.variable} ${kiments.variable} antialiased`}>
         <ThemeProvider
           attribute="class"
           defaultTheme="system"
           enableSystem
           disableTransitionOnChange
         >
-          {children}
-          <Toaster richColors expand position="top-center" />
+          <AuthProvider>
+            {children}
+            <ServiceWorkerRegistrar />
+            <Toaster richColors expand position="top-center" />
+          </AuthProvider>
         </ThemeProvider>
       </body>
     </html>

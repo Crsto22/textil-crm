@@ -10,11 +10,8 @@ import { usePathname, useRouter } from "next/navigation";
 
 import { navSections } from "@/components/Sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
-import {
-  clearSession,
-  getStoredSession,
-  type CrmSession,
-} from "@/lib/auth/session";
+import { useAuth } from "@/lib/auth/auth-context";
+import { CRM_STANDARD_USER_PATHS, getRoleLabel, isCrmAdmin } from "@/lib/auth/roles";
 import { UserAvatar } from "@/components/ui/user-avatar";
 import {
   DropdownMenu,
@@ -37,13 +34,15 @@ const pageTitles: Record<string, string> = {
   "/configuracion": "Configuracion",
   "/etiquetas": "Etiquetas",
   "/reportes": "Reportes",
+  "/empresa": "Empresa",
 };
 
 export function Header({ onMenuToggle, showMenuButton = true }: HeaderProps) {
   const pathname = usePathname();
   const router = useRouter();
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const [session] = useState<CrmSession | null>(() => getStoredSession());
+  const { user, logout } = useAuth();
+  const userIsAdmin = isCrmAdmin(user?.rol);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -76,6 +75,7 @@ export function Header({ onMenuToggle, showMenuButton = true }: HeaderProps) {
         .map((section) => ({
           ...section,
           items: section.items.filter((item) => {
+            if (!userIsAdmin && !CRM_STANDARD_USER_PATHS.includes(item.href as (typeof CRM_STANDARD_USER_PATHS)[number])) return false;
             if (!searchQuery.trim()) return true;
 
             const query = searchQuery.toLowerCase();
@@ -87,10 +87,12 @@ export function Header({ onMenuToggle, showMenuButton = true }: HeaderProps) {
           }),
         }))
         .filter((section) => section.items.length > 0),
-    [searchQuery],
+    [searchQuery, userIsAdmin],
   );
 
-  const totalModules = navSections.flatMap((section) => section.items).length;
+  const totalModules = navSections
+    .flatMap((section) => section.items)
+    .filter((item) => userIsAdmin || CRM_STANDARD_USER_PATHS.includes(item.href as (typeof CRM_STANDARD_USER_PATHS)[number])).length;
   const title = pageTitles[pathname] ?? "Panel";
   const sectionLabel = pathname.startsWith("/reportes") ? "Reportes" : "CRM";
 
@@ -99,13 +101,14 @@ export function Header({ onMenuToggle, showMenuButton = true }: HeaderProps) {
     setSearchQuery("");
   };
 
-  const handleLogout = () => {
-    clearSession();
+  const handleLogout = async () => {
+    await logout();
     router.replace("/");
   };
 
-  const userName = session?.name ?? "Usuario CRM";
-  const userEmail = session?.email ?? "Sesion activa";
+  const userName = [user?.nombre, user?.apellido].filter(Boolean).join(" ") || "Usuario CRM";
+  const userEmail = user?.correo ?? "Sesion activa";
+  const roleLabel = getRoleLabel(user?.rol);
   const nameParts = userName.split(" ");
   const firstName = nameParts[0] ?? "";
   const lastName = nameParts.slice(1).join(" ") || (firstName.charAt(1) ?? "");
@@ -210,7 +213,7 @@ export function Header({ onMenuToggle, showMenuButton = true }: HeaderProps) {
                         {userEmail}
                       </p>
                       <span className="mt-1.5 inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold leading-none text-blue-700 dark:bg-blue-500/15 dark:text-blue-300">
-                        CRM
+                        {roleLabel}
                       </span>
                     </div>
                   </div>

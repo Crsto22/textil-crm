@@ -3,6 +3,7 @@
 import { useEffect, useState, type ComponentType } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
+  BuildingOffice2Icon,
   ChartBarIcon,
   ChatBubbleLeftRightIcon,
   ChevronDownIcon,
@@ -16,6 +17,7 @@ import {
   XMarkIcon,
 } from "@heroicons/react/24/outline";
 import {
+  BuildingOffice2Icon as BuildingOffice2IconSolid,
   ChartBarIcon as ChartBarIconSolid,
   ChatBubbleLeftRightIcon as ChatBubbleLeftRightIconSolid,
   Cog6ToothIcon as Cog6ToothIconSolid,
@@ -23,6 +25,8 @@ import {
   TagIcon as TagIconSolid,
   UserGroupIcon as UserGroupIconSolid,
 } from "@heroicons/react/24/solid";
+import { useAuth } from "@/lib/auth/auth-context";
+import { CRM_STANDARD_USER_PATHS, isCrmAdmin } from "@/lib/auth/roles";
 
 interface SidebarProps {
   isOpen: boolean;
@@ -84,6 +88,12 @@ export const navSections: SidebarSection[] = [
           icon: ChartBarIcon,
           iconActive: ChartBarIconSolid,
         },
+        {
+          label: "Empresa",
+          href: "/empresa",
+          icon: BuildingOffice2Icon,
+          iconActive: BuildingOffice2IconSolid,
+        },
     ],
   },
 ];
@@ -129,6 +139,8 @@ export function Sidebar({
 }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const { user } = useAuth();
+  const userIsAdmin = isCrmAdmin(user?.rol);
   const [searchTerm, setSearchTerm] = useState("");
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>(
     getStoredExpandedSections,
@@ -156,7 +168,9 @@ export function Sidebar({
   const filteredSections = navSections
     .map((section) => ({
       ...section,
-      items: section.items.filter((item) => matchQuery(item)),
+      items: section.items.filter((item) =>
+        (userIsAdmin || CRM_STANDARD_USER_PATHS.includes(item.href as (typeof CRM_STANDARD_USER_PATHS)[number]))
+        && matchQuery(item)),
     }))
     .filter((section) => section.items.length > 0);
 

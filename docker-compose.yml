@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  textil-crm-frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_BACKEND_URL: https://api.kiments.tech
+        BACKEND_URL: https://api.kiments.tech
+
+    container_name: textil-crm-frontend
+
+    ports:
+      - "3002:3000"
+
+    env_file:
+      - .env
+
+    environment:
+      - NODE_ENV=production
+      - BACKEND_URL=https://api.kiments.tech
+      - NEXT_PUBLIC_BACKEND_URL=https://api.kiments.tech
+      - COOKIE_DOMAIN=.kiments.tech
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    networks:
+      - textil-crm-network
+
+networks:
+  textil-crm-network:
+    driver: bridge

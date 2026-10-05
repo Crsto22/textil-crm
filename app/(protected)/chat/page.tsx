@@ -445,15 +445,18 @@ const mapMessage = (
   }
 
   const hasMedia = Boolean(message.mediaUrl || message.mediaFileName || message.messageType !== "TEXT");
-  const isOutgoingAudio = message.direction === "OUTGOING" && (
+  const isAudioContent =
     message.messageType === "AUDIO" ||
-    isAudioFile(message.mediaMimeType || undefined, message.mediaFileName || undefined)
-  );
+    isAudioFile(message.mediaMimeType || undefined, message.mediaFileName || undefined);
+  const isOutgoingAudio = message.direction === "OUTGOING" && isAudioContent;
+  const isIncomingAudio = message.direction === "INCOMING" && isAudioContent;
 
   return {
     id: String(message.id),
     type: isOutgoingAudio
       ? "outgoing-audio"
+      : isIncomingAudio
+      ? "incoming-audio"
       : hasMedia
       ? message.direction === "INCOMING"
         ? "incoming-file"
@@ -467,7 +470,7 @@ const mapMessage = (
     aiGenerated: message.origin === "AI_AUTOMATIC",
     fileType: message.mediaMimeType || undefined,
     fileUrl: mediaObjectUrl ?? message.mediaUrl ?? undefined,
-    audioUrl: isOutgoingAudio ? mediaObjectUrl ?? message.mediaUrl ?? undefined : undefined,
+    audioUrl: isOutgoingAudio || isIncomingAudio ? mediaObjectUrl ?? message.mediaUrl ?? undefined : undefined,
     replyTo: message.replyTo
       ? {
           id: String(message.replyTo.id),
@@ -1808,27 +1811,38 @@ function MessageBubble({
     );
   }
 
-  if (item.type === "outgoing-audio") {
+  if (item.type === "outgoing-audio" || item.type === "incoming-audio") {
+    const isOutgoingAudio = item.type === "outgoing-audio";
     return (
-      <div className="whatsapp-outgoing-bubble outgoing-audio-bubble desktop-audio-bubble ml-auto w-fit max-w-[88%] rounded-md px-3 py-3 text-sm shadow-sm md:max-w-[55%] md:rounded-lg md:px-3.5 md:py-2.5 md:shadow-[0_1px_1px_rgba(11,20,26,0.18)]">
+      <div className={cn(
+        "w-fit max-w-[88%] rounded-md px-3 py-3 text-sm shadow-sm md:max-w-[55%] md:rounded-lg md:px-3.5 md:py-2.5",
+        isOutgoingAudio
+          ? "whatsapp-outgoing-bubble outgoing-audio-bubble desktop-audio-bubble ml-auto md:shadow-[0_1px_1px_rgba(11,20,26,0.18)]"
+          : "mr-auto border border-border bg-card text-card-foreground",
+      )}>
         <div className="mb-1 flex justify-end">
           <MessageActions item={item} onReply={onReply} onDelete={onDelete} deleting={deleting} />
         </div>
         <MessageQuotePreview quote={item.replyTo} />
         <audio ref={audioRef} src={authenticatedAudioUrl} preload="none" />
-        <div className="flex min-w-[240px] max-w-full items-center gap-3 md:min-w-[330px] md:gap-2.5">
-          <div className="relative h-10 w-10 shrink-0">
-            <div className="desktop-audio-avatar flex h-10 w-10 items-center justify-center rounded-full bg-black/10 text-muted-foreground md:h-11 md:w-11">
-              <UserIconSolid className="h-5 w-5" />
+        <div className={cn(
+          "flex max-w-full items-center gap-3 md:gap-2.5",
+          isOutgoingAudio ? "min-w-[240px] md:min-w-[330px]" : "min-w-[200px] md:min-w-[260px]",
+        )}>
+          {isOutgoingAudio && (
+            <div className="relative h-10 w-10 shrink-0">
+              <div className="desktop-audio-avatar flex h-10 w-10 items-center justify-center rounded-full bg-black/10 text-muted-foreground md:h-11 md:w-11">
+                <UserIconSolid className="h-5 w-5" />
+              </div>
+              <div className="desktop-audio-mic absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 text-white">
+                <MicrophoneIcon className="h-3 w-3" />
+              </div>
             </div>
-            <div className="desktop-audio-mic absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 text-white">
-              <MicrophoneIcon className="h-3 w-3" />
-            </div>
-          </div>
+          )}
           <div className="flex min-w-0 flex-1 items-center gap-2 md:gap-3">
             <button
               onClick={handleTogglePlay}
-              className="desktop-audio-play flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-emerald-700 hover:bg-black/5 md:h-9 md:w-9"
+              className="desktop-audio-play flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-emerald-700 hover:bg-black/5 md:h-9 md:w-9 dark:text-emerald-400 dark:hover:bg-white/10"
               aria-label={isPlaying ? "Pausar audio" : "Reproducir audio"}
             >
               {isPlaying ? (
@@ -1848,9 +1862,13 @@ function MessageBubble({
                     style={{
                       height,
                       left: `${(index / AUDIO_WAVEFORM_BARS.length) * 100}%`,
-                      backgroundColor: isPlayed
-                        ? "var(--chat-audio-played, rgb(255, 255, 255))"
-                        : "var(--chat-audio-idle, rgba(255, 255, 255, 0.4))",
+                      backgroundColor: isOutgoingAudio
+                        ? isPlayed
+                          ? "var(--chat-audio-played, rgb(255, 255, 255))"
+                          : "var(--chat-audio-idle, rgba(255, 255, 255, 0.4))"
+                        : isPlayed
+                          ? "var(--chat-audio-played, rgb(16, 185, 129))"
+                          : "var(--chat-audio-idle, rgba(100, 116, 139, 0.4))",
                     }}
                   />
                 );
@@ -1863,9 +1881,12 @@ function MessageBubble({
             </span>
           </div>
         </div>
-        <p className="desktop-audio-time whatsapp-outgoing-meta mt-2 flex items-center justify-end gap-1 text-[10px] md:mt-1">
-          {item.status === "accepted" ? "Enviando..." : item.time}
-          {item.status === "failed" ? (
+        <p className={cn(
+          "mt-2 flex items-center justify-end gap-1 text-[10px] md:mt-1",
+          isOutgoingAudio ? "desktop-audio-time whatsapp-outgoing-meta" : "text-muted-foreground",
+        )}>
+          {isOutgoingAudio && item.status === "accepted" ? "Enviando..." : item.time}
+          {isOutgoingAudio && item.status === "failed" ? (
             <button
               type="button"
               onClick={() => onRetry?.(item)}
@@ -1873,9 +1894,9 @@ function MessageBubble({
             >
               Error · Reintentar
             </button>
-          ) : (
+          ) : isOutgoingAudio ? (
             <MessageStatusChecks status={item.status} />
-          )}
+          ) : null}
         </p>
       </div>
     );
@@ -4227,7 +4248,7 @@ export default function ChatPage() {
 
   const latestIncomingMessageId = [...messages]
     .reverse()
-    .find((message) => message.type === "incoming" || message.type === "incoming-file")
+    .find((message) => message.type === "incoming" || message.type === "incoming-file" || message.type === "incoming-audio")
     ?.id ?? null;
   const latestUnreviewedAiRun = activeAiState?.content.find((run) => (
     !run.feedback

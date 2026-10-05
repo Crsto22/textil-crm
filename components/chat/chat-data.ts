@@ -24,6 +24,7 @@ export type ChatMessage = {
     | "date"
     | "system"
     | "incoming-file"
+    | "incoming-audio"
     | "outgoing-file"
     | "outgoing-audio"
     | "outgoing"

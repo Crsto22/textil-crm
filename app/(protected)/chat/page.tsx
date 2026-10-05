@@ -450,6 +450,9 @@ const mapMessage = (
     isAudioFile(message.mediaMimeType || undefined, message.mediaFileName || undefined);
   const isOutgoingAudio = message.direction === "OUTGOING" && isAudioContent;
   const isIncomingAudio = message.direction === "INCOMING" && isAudioContent;
+  const mediaFileName = message.mediaFileName?.trim() || "";
+  const bodyText = message.body?.trim() || "";
+  const mediaCaption = hasMedia && bodyText && bodyText !== mediaFileName ? bodyText : "";
 
   return {
     id: String(message.id),
@@ -464,13 +467,14 @@ const mapMessage = (
       : message.direction === "INCOMING"
         ? "incoming"
         : "outgoing",
-    text: message.mediaFileName || message.body || "",
+    text: hasMedia ? mediaFileName || bodyText : bodyText,
     time: formatChatTime(message.createdAt),
     status: message.status || "sent",
     aiGenerated: message.origin === "AI_AUTOMATIC",
     fileType: message.mediaMimeType || undefined,
     fileUrl: mediaObjectUrl ?? message.mediaUrl ?? undefined,
     audioUrl: isOutgoingAudio || isIncomingAudio ? mediaObjectUrl ?? message.mediaUrl ?? undefined : undefined,
+    caption: mediaCaption || undefined,
     replyTo: message.replyTo
       ? {
           id: String(message.replyTo.id),
@@ -487,7 +491,7 @@ const mapMessage = (
 const buildReplyQuote = (message: ChatMessage): ChatMessage["replyTo"] => ({
   id: message.id,
   direction: message.type.startsWith("outgoing") ? "OUTGOING" : "INCOMING",
-  body: message.deleted ? "Mensaje eliminado" : message.text,
+  body: message.deleted ? "Mensaje eliminado" : message.caption || message.text,
   messageType: message.type.includes("file") ? "DOCUMENT" : message.type.includes("audio") ? "AUDIO" : "TEXT",
   deleted: message.deleted,
 });
@@ -1672,6 +1676,8 @@ function MessageBubble({
     const isVideoAttachment = isVideoFile(item.fileType, item.text) && item.fileUrl;
     const isPdfAttachmentMessage = isPdfFile(item.fileType, item.text) && item.fileUrl;
     const fileBadge = getFileBadge(item.text, item.fileType);
+    const mediaCaption = item.caption?.trim();
+    const imageAlt = mediaCaption || item.text || "Imagen";
 
     return (
       <div ref={mediaViewportRef} className={`relative w-fit max-w-[88%] rounded-md text-sm shadow-sm md:max-w-[55%] ${
@@ -1687,19 +1693,24 @@ function MessageBubble({
           <div className="space-y-1.5">
             <button
               type="button"
-              onClick={() => visualMediaUrl && onOpenImagePreview({ alt: item.text, url: visualMediaUrl })}
-              aria-label={item.text}
+              onClick={() => visualMediaUrl && onOpenImagePreview({ alt: imageAlt, url: visualMediaUrl })}
+              aria-label={imageAlt}
               className="block h-64 w-[min(68vw,320px)] overflow-hidden rounded bg-muted"
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={visualMediaUrl}
-                alt={item.text}
+                alt={imageAlt}
                 loading="lazy"
                 decoding="async"
                 className="h-full w-full object-cover"
               />
             </button>
+            {mediaCaption ? (
+              <p className="whitespace-pre-wrap break-words px-1 text-sm leading-relaxed">
+                {mediaCaption}
+              </p>
+            ) : null}
             {paymentReview ? (
               <Button
                 type="button"
@@ -1714,17 +1725,25 @@ function MessageBubble({
           </div>
         ) : isVideoAttachment ? (
           visualMediaUrl ? (
-            <video
-              src={visualMediaUrl}
-              controls
-              playsInline
-              preload="none"
-              className="max-h-72 w-[min(76vw,360px)] rounded bg-black"
-            />
+            <div className="space-y-1.5">
+              <video
+                src={visualMediaUrl}
+                controls
+                playsInline
+                preload="none"
+                className="max-h-72 w-[min(76vw,360px)] rounded bg-black"
+              />
+              {mediaCaption ? (
+                <p className="whitespace-pre-wrap break-words px-1 text-sm leading-relaxed">
+                  {mediaCaption}
+                </p>
+              ) : null}
+            </div>
           ) : (
             <div className="h-48 w-[min(76vw,360px)] animate-pulse rounded bg-muted" />
           )
         ) : isPdfAttachmentMessage ? (
+          <>
           <div className="w-[min(76vw,340px)] overflow-hidden rounded bg-[#1f2c24] dark:bg-[#1f2428]">
             <button
               type="button"
@@ -1762,6 +1781,12 @@ function MessageBubble({
               )}
             </div>
           </div>
+          {mediaCaption ? (
+            <p className="whitespace-pre-wrap break-words px-1 text-sm leading-relaxed">
+              {mediaCaption}
+            </p>
+          ) : null}
+          </>
         ) : (
           <>
             <div className="mb-2 flex items-center justify-between gap-3 font-semibold">
@@ -1789,6 +1814,11 @@ function MessageBubble({
                 </button>
               )}
             </div>
+            {mediaCaption ? (
+              <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-relaxed">
+                {mediaCaption}
+              </p>
+            ) : null}
           </>
         )}
         <p className={`flex items-center justify-end gap-1 text-[10px] ${

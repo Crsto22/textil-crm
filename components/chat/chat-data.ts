@@ -36,6 +36,7 @@ export type ChatMessage = {
   fileSize?: number;
   fileType?: string;
   fileUrl?: string;
+  caption?: string;
   pageCount?: number;
   retryText?: string;
   retryFile?: File;

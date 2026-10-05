@@ -5,6 +5,7 @@ import { forwardCookies } from "../../../auth/_helpers"
 const BACKEND_URL = process.env.BACKEND_URL
 
 export const dynamic = "force-dynamic"
+export const runtime = "nodejs"
 
 export async function GET(request: NextRequest) {
   if (!BACKEND_URL) {

@@ -7,6 +7,7 @@ interface CookieOptions {
   httpOnly?: boolean
   secure?: boolean
   sameSite?: "lax" | "strict" | "none"
+  domain?: string
 }
 
 export function forwardCookies(backendRes: Response, nextRes: NextResponse): void {
@@ -15,7 +16,14 @@ export function forwardCookies(backendRes: Response, nextRes: NextResponse): voi
   for (const raw of setCookieHeaders) {
     const parsed = parseSetCookie(raw)
     if (parsed) {
+      const migrateRefreshCookie = parsed.name === "refresh_token" && process.env.COOKIE_DOMAIN
+      if (migrateRefreshCookie) {
+        parsed.options.domain = process.env.COOKIE_DOMAIN
+      }
       nextRes.cookies.set(parsed.name, parsed.value, parsed.options)
+      if (migrateRefreshCookie) {
+        appendHostRefreshTokenDeletion(nextRes, parsed.options.path)
+      }
     }
   }
 }
@@ -39,10 +47,19 @@ export function clearRefreshTokenCookie(nextRes: NextResponse): void {
     maxAge: 0,
     ...(process.env.COOKIE_DOMAIN ? { domain: process.env.COOKIE_DOMAIN } : {}),
   })
+  if (process.env.COOKIE_DOMAIN) {
+    appendHostRefreshTokenDeletion(nextRes)
+  }
 }
 
 export function clearSessionUserCookie(nextRes: NextResponse): void {
   nextRes.cookies.set("session_user", "", { path: "/", maxAge: 0 })
+}
+
+function appendHostRefreshTokenDeletion(nextRes: NextResponse, path = "/api/auth"): void {
+  const attributes = ["refresh_token=", `Path=${path}`, "Max-Age=0", "HttpOnly", "SameSite=Lax"]
+  if (process.env.NODE_ENV === "production") attributes.push("Secure")
+  nextRes.headers.append("Set-Cookie", attributes.join("; "))
 }
 
 export function normalizeBackendUser(data: Record<string, unknown>): AuthUser {
@@ -94,6 +111,8 @@ function parseSetCookie(raw: string): { name: string; value: string; options: Co
       options.maxAge = parseInt(attr.substring(8), 10)
     } else if (lower.startsWith("samesite=")) {
       options.sameSite = attr.substring(9).toLowerCase() as CookieOptions["sameSite"]
+    } else if (lower.startsWith("domain=")) {
+      options.domain = attr.substring(7)
     }
   }
 

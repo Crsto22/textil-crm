@@ -198,4 +198,14 @@
   background: rgba(148, 163, 184, 0.55);
 }
 
+/* Scroll horizontal con barra invisible */
+.scrollbar-hide {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
 

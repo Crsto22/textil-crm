@@ -1,5 +1,5 @@
 const chatWallpaperClass =
-  "bg-[image:url('/img/fondos/ModoClaro.png')] bg-cover bg-center dark:bg-[image:url('/img/fondos/ModoOscuro.png')]";
+  "bg-[image:url('/modo/modo-claro.png')] bg-cover bg-center dark:bg-[image:url('/modo/modo-oscuro.png')]";
 
 export function ChatWallpaperLayer() {
   return (

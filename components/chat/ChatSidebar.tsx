@@ -10,6 +10,7 @@ import {
   ClipboardDocumentListIcon,
   MagnifyingGlassIcon,
   ShoppingBagIcon,
+  SparklesIcon,
   UserPlusIcon,
   UserIcon,
   XMarkIcon,
@@ -63,6 +64,7 @@ interface ChatSidebarProps {
   conversationId: string
   clientPhone: string
   contactName?: string | null
+  aiAttending?: boolean
   onClose: () => void
   onSaleCompleted?: () => void
   onClientUpdated?: () => void
@@ -86,7 +88,7 @@ async function readError(response: Response, fallback: string) {
   return data?.message || data?.detail || data?.error || fallback
 }
 
-export function ChatSidebar({ conversationId, clientPhone, contactName, onClose, onSaleCompleted, onClientUpdated }: ChatSidebarProps) {
+export function ChatSidebar({ conversationId, clientPhone, contactName, aiAttending = false, onClose, onSaleCompleted, onClientUpdated }: ChatSidebarProps) {
   const router = useRouter()
   const [context, setContext] = useState<QuickSaleContext | null>(null)
   const [loading, setLoading] = useState(true)
@@ -359,9 +361,10 @@ export function ChatSidebar({ conversationId, clientPhone, contactName, onClose,
           <button
             type="button"
             onClick={() => handleRegisterOpenChange(true)}
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-emerald-600 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50 dark:border-slate-700 dark:bg-slate-900 dark:text-emerald-400 dark:hover:bg-emerald-500/10"
+            disabled={aiAttending}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-emerald-600 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-slate-200 disabled:hover:bg-white dark:border-slate-700 dark:bg-slate-900 dark:text-emerald-400 dark:hover:bg-emerald-500/10 dark:disabled:hover:bg-slate-900"
             aria-label={context?.cliente ? "Editar cliente" : "Registrar cliente"}
-            title={context?.cliente ? "Editar cliente" : "Registrar cliente"}
+            title={aiAttending ? "Kiments IA atiende este chat. Cambia a atención humana para registrar al cliente." : context?.cliente ? "Editar cliente" : "Registrar cliente"}
           >
             <UserPlusIcon className="h-3.5 w-3.5" />
           </button>
@@ -481,7 +484,17 @@ export function ChatSidebar({ conversationId, clientPhone, contactName, onClose,
 
           </section>
 
-          {context ? (
+          {aiAttending ? (
+            <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-amber-300 bg-amber-50/60 px-4 py-6 text-center dark:border-amber-500/30 dark:bg-amber-500/10">
+              <SparklesIcon className="h-8 w-8 text-amber-500" />
+              <p className="text-xs font-semibold text-amber-800 dark:text-amber-200">
+                Kiments IA esta atendiendo este chat
+              </p>
+              <p className="text-[11px] leading-snug text-amber-700/80 dark:text-amber-200/70">
+                Cambia a atencion humana para vender o registrar al cliente.
+              </p>
+            </div>
+          ) : context ? (
             <CrmQuickSalePanelFlow
               conversationId={conversationId}
               context={context}

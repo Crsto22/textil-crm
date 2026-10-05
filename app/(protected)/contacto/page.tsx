@@ -24,6 +24,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { PaginationResponsive } from "@/components/ui/pagination-responsive"
 import { CrmClientForm, type CrmClientFormValue } from "@/components/crm/CrmClientForm"
 import { cn } from "@/lib/utils"
 import { authFetch } from "@/lib/auth/auth-fetch"
@@ -262,13 +263,8 @@ export default function ContactoPage() {
     setPage(0)
   }
 
-  const pageSummary = pagination
-    ? `${pagination.totalElements} contacto${pagination.totalElements === 1 ? "" : "s"}`
-    : "Contactos CRM"
-
   return (
-    <div className="min-h-screen bg-slate-50 px-2 py-3 text-slate-950 dark:bg-slate-950 dark:text-slate-50 sm:px-3 lg:px-4">
-      <div className="flex w-full flex-col gap-4">
+    <div className="flex w-full flex-col gap-4">
         <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="relative w-full lg:max-w-md">
@@ -341,31 +337,13 @@ export default function ContactoPage() {
           </>
         )}
 
-        <footer className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-500 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 sm:flex-row sm:items-center sm:justify-between">
-          <span>{pageSummary}</span>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              className="h-9 rounded-xl"
-              disabled={loading || page === 0 || Boolean(pagination?.first)}
-              onClick={() => setPage((current) => Math.max(0, current - 1))}
-            >
-              Anterior
-            </Button>
-            <span className="min-w-24 text-center text-xs font-semibold uppercase tracking-[0.12em]">
-              Pag. {page + 1} de {pagination?.totalPages ? pagination.totalPages : 1}
-            </span>
-            <Button
-              variant="outline"
-              className="h-9 rounded-xl"
-              disabled={loading || Boolean(pagination?.last) || !pagination}
-              onClick={() => setPage((current) => current + 1)}
-            >
-              Siguiente
-            </Button>
-          </div>
-        </footer>
-      </div>
+        <PaginationResponsive
+          totalElements={pagination?.totalElements ?? 0}
+          totalPages={pagination?.totalPages ?? 1}
+          page={page}
+          onPageChange={setPage}
+          itemLabel="contactos"
+        />
 
       <Dialog open={Boolean(editingContact)} onOpenChange={(open) => !open && setEditingContact(null)}>
         <DialogContent className="max-h-[92vh] overflow-y-auto rounded-xl p-5 sm:max-w-md">

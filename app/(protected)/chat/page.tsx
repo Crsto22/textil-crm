@@ -19,6 +19,7 @@ import { useSearchParams } from "next/navigation";
 import {
   ArrowLeftIcon,
   ArrowUturnLeftIcon,
+  ArrowPathIcon,
   ArrowPathRoundedSquareIcon,
   BackspaceIcon,
   ChatBubbleLeftRightIcon,
@@ -29,7 +30,6 @@ import {
   PhotoIcon,
   PlusIcon,
   PaperAirplaneIcon,
-  EyeIcon,
   ExclamationTriangleIcon,
   FunnelIcon,
   MagnifyingGlassIcon,
@@ -1220,7 +1220,6 @@ function ConversationRow({
             <span />
           )}
           <span className="flex items-center gap-2">
-          <EyeIcon className="h-4 w-4" />
           <ChevronDownIcon className="h-3.5 w-3.5" />
           <span className="rounded bg-muted-foreground/35 px-1.5 py-0.5 text-[10px] font-semibold text-background">
             {conversation.initials}
@@ -3126,6 +3125,7 @@ export default function ChatPage() {
     ?? (activeConversation?.assignedUserId ? "HUMANA" : "AUTOMATICA");
   const globalAutomaticEnabled = !activeAiState || activeAiState.mode === "AUTOMATICA";
   const effectiveAttentionMode: AiAttentionMode = globalAutomaticEnabled ? activeAttentionMode : "HUMANA";
+  const aiAttendingActive = effectiveAttentionMode === "AUTOMATICA";
   const globalAiDisabledReason = globalAutomaticEnabled
     ? ""
     : activeAiState?.mode === "SUGERENCIAS"
@@ -3164,6 +3164,7 @@ export default function ChatPage() {
     return () => controller.abort();
   }, [activeConversationId]);
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Contexto IA Kiments oculto temporalmente
   const clearAiMemory = useCallback(async () => {
     if (!activeConversationId) return;
     const response = await authFetch(`/api/crm/whatsapp/conversations/${activeConversationId}/ai/memory`, {
@@ -3461,13 +3462,17 @@ export default function ChatPage() {
       setActiveFilter("all");
       if (action === "ACCEPT") {
         setActivePaymentReview(null);
-        setIsSidebarOpen(true);
-        window.setTimeout(() => {
-          window.dispatchEvent(new CustomEvent("crm-open-payment-sale", {
-            detail: { conversationId: Number(activeConversationId) },
-          }));
-        }, 0);
-        toast.success("Pago aceptado. Completa la venta en Venta Rapida");
+        if (aiAttendingActive) {
+          toast.error("Cambia el chat a atención humana para completar la venta");
+        } else {
+          setIsSidebarOpen(true);
+          window.setTimeout(() => {
+            window.dispatchEvent(new CustomEvent("crm-open-payment-sale", {
+              detail: { conversationId: Number(activeConversationId) },
+            }));
+          }, 0);
+          toast.success("Pago aceptado. Completa la venta en Venta Rapida");
+        }
       } else {
         setActivePaymentReview(null);
         window.dispatchEvent(new CustomEvent("crm-ai-sale-draft-event", {
@@ -3483,7 +3488,7 @@ export default function ChatPage() {
     } finally {
       setPaymentDecisionLoading(false);
     }
-  }, [activeConversationId, activePaymentReview, paymentDecisionLoading]);
+  }, [activeConversationId, activePaymentReview, paymentDecisionLoading, aiAttendingActive]);
 
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [activeMobileEmojiCategory, setActiveMobileEmojiCategory] =
@@ -5173,6 +5178,18 @@ export default function ChatPage() {
                 )}
               </DropdownMenuContent>
             </DropdownMenu>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              disabled={isConversationListLoading}
+              onClick={() => void loadConversations({ reset: true, force: true }).catch(() => undefined)}
+              className="h-9 w-9 shrink-0 rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+              aria-label="Recargar chats"
+              title="Recargar chats"
+            >
+              <ArrowPathIcon className={cn("h-4 w-4", isConversationListLoading && "animate-spin")} />
+            </Button>
           </div>
 
           {selectedTagFilter && (
@@ -5254,7 +5271,7 @@ export default function ChatPage() {
                 variant="outline"
                 size="sm"
                 className="mt-4"
-                onClick={() => void loadConversations({ reset: true }).catch(() => undefined)}
+                onClick={() => void loadConversations({ reset: true, force: true }).catch(() => undefined)}
               >
                 Reintentar
               </Button>
@@ -5359,10 +5376,10 @@ export default function ChatPage() {
                   disabled={!canChangeAiAttention || isChangingAiAttention || !globalAutomaticEnabled}
                   aria-label="IA Kiments automatica"
                   title={globalAutomaticEnabled ? "IA Kiments automatica" : globalAiDisabledReason}
-                  className={cn("flex h-8 items-center justify-center gap-0 rounded-md px-2 text-[10px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 md:gap-1.5", effectiveAttentionMode === "AUTOMATICA" ? "bg-background text-blue-700 shadow-sm dark:text-blue-300" : "text-muted-foreground hover:text-foreground")}
+                  className={cn("flex h-8 items-center justify-center gap-1.5 rounded-md px-2 text-[10px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-50", effectiveAttentionMode === "AUTOMATICA" ? "bg-background text-blue-700 shadow-sm dark:text-blue-300" : "text-muted-foreground hover:text-foreground")}
                 >
-                  <SparklesIcon className="h-4 w-4 md:h-3.5 md:w-3.5" />
-                  <span className="hidden md:inline">IA Kiments</span>
+                  <SparklesIcon className="h-3.5 w-3.5" />
+                  <span>IA Kiments</span>
                 </button>
                 <button
                   type="button"
@@ -5370,10 +5387,10 @@ export default function ChatPage() {
                   disabled={!canChangeAiAttention || isChangingAiAttention}
                   aria-label="Atencion humana"
                   title="Atencion humana"
-                  className={cn("flex h-8 items-center justify-center gap-0 rounded-md px-2 text-[10px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 md:gap-1.5", effectiveAttentionMode === "HUMANA" ? "bg-background text-emerald-700 shadow-sm dark:text-emerald-300" : "text-muted-foreground hover:text-foreground")}
+                  className={cn("flex h-8 items-center justify-center gap-1.5 rounded-md px-2 text-[10px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-50", effectiveAttentionMode === "HUMANA" ? "bg-background text-emerald-700 shadow-sm dark:text-emerald-300" : "text-muted-foreground hover:text-foreground")}
                 >
-                  <UserIconSolid className="h-4 w-4 md:h-3.5 md:w-3.5" />
-                  <span className="hidden md:inline">Humano</span>
+                  <UserIconSolid className="h-3.5 w-3.5" />
+                  <span>Humano</span>
                 </button>
               </div>
               {!globalAutomaticEnabled ? (
@@ -5387,7 +5404,7 @@ export default function ChatPage() {
               ) : null}
             </div>
 
-            <div className="flex items-center gap-1.5 md:gap-2">
+            <div className="flex w-full items-center justify-center gap-1.5 md:w-auto md:justify-start md:gap-2">
               {!isUnassignedWaitingActive && <div className="relative flex rounded-full bg-muted text-foreground shadow-sm">
                 {resolvedIds.has(activeConversationId) ? (
                   <Button
@@ -5452,43 +5469,61 @@ export default function ChatPage() {
               )}
               <button
                 type="button"
-                onClick={toggleSidebar}
-                className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
-                  isSidebarOpen
-                    ? "bg-muted text-foreground"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                }`}
-                aria-label="Abrir panel de venta"
-                title="Venta Rapida"
+                onClick={() => {
+                  if (activeConversationId) void loadMessages(activeConversationId, { preserveLocal: true }).catch(() => undefined)
+                }}
+                disabled={isMessagesLoading}
+                className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+                aria-label="Recargar mensajes"
+                title="Recargar mensajes"
               >
-                <ShoppingBagIcon className="h-5 w-5" />
+                <ArrowPathIcon className={cn("h-5 w-5", isMessagesLoading && "animate-spin")} />
               </button>
+              <span
+                title={aiAttendingActive ? "Kiments IA atiende este chat. Cambia a atención humana para vender." : "Venta Rapida"}
+              >
+                <button
+                  type="button"
+                  onClick={toggleSidebar}
+                  disabled={aiAttendingActive}
+                  className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                    isSidebarOpen
+                      ? "bg-muted text-foreground"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  }`}
+                  aria-label="Abrir panel de venta"
+                >
+                  <ShoppingBagIcon className="h-5 w-5" />
+                </button>
+              </span>
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={openTagModal}
-            className="flex h-10 w-full items-center justify-between px-4 text-left text-sm text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <span className="flex items-center gap-2">
-              Etiquetas
-              {activeConversationTags.length > 0 && (
-                <span className="flex items-center gap-1">
-                  {activeConversationTags.map((tag) => (
-                    <span
-                      key={tag.id}
-                      className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold text-white"
-                      style={{ backgroundColor: tag.color }}
-                    >
-                      {tag.label}
-                    </span>
-                  ))}
-                </span>
-              )}
-            </span>
-            <ChevronDownIcon className="h-4 w-4 text-muted-foreground" />
-          </button>
+          {!aiAttendingActive && (
+            <button
+              type="button"
+              onClick={openTagModal}
+              className="flex h-10 w-full items-center justify-between px-4 text-left text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <span className="flex items-center gap-2">
+                Etiquetas
+                {activeConversationTags.length > 0 && (
+                  <span className="flex items-center gap-1">
+                    {activeConversationTags.map((tag) => (
+                      <span
+                        key={tag.id}
+                        className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold text-white"
+                        style={{ backgroundColor: tag.color }}
+                      >
+                        {tag.label}
+                      </span>
+                    ))}
+                  </span>
+                )}
+              </span>
+              <ChevronDownIcon className="h-4 w-4 text-muted-foreground" />
+            </button>
+          )}
         </header>
 
         <div className="relative min-h-0 flex-1 overflow-hidden bg-muted/60">
@@ -5577,6 +5612,7 @@ export default function ChatPage() {
               </Link>
             </div>
           )}
+          {/* Contexto IA Kiments (oculto temporalmente)
           {activeAiMemory && (activeAiMemory.productName || activeAiMemory.cart.length > 0) && (
             <div className="relative z-10 mb-2 rounded-lg border border-blue-200 bg-background/95 px-3 py-2 shadow-sm dark:border-blue-500/25">
               <div className="flex items-start gap-2">
@@ -5605,6 +5641,7 @@ export default function ChatPage() {
               </div>
             </div>
           )}
+          */}
           {isAiPanelOpen
             && !Boolean(activeAiRun?.requiresHuman || activeAiRun?.outcome === "HUMAN_REQUIRED")
             && (
@@ -6304,6 +6341,7 @@ export default function ChatPage() {
             conversationId={activeConversationId}
             clientPhone={activeConversation?.phone || ""}
             contactName={activeConversation?.contactName}
+            aiAttending={aiAttendingActive}
             onClientUpdated={() => {
               void loadConversations();
             }}
@@ -6330,6 +6368,7 @@ export default function ChatPage() {
             conversationId={activeConversationId}
             clientPhone={activeConversation?.phone || ""}
             contactName={activeConversation?.contactName}
+            aiAttending={aiAttendingActive}
             onClientUpdated={() => {
               void loadConversations();
             }}

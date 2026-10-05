@@ -28,7 +28,7 @@ function MobileBottomNav({ hidden, isAdmin }: { hidden: boolean; isAdmin: boolea
       )}
       aria-label="Navegacion principal"
     >
-      <div className="grid grid-cols-4 gap-1">
+      <div className="scrollbar-hide flex items-stretch gap-1 overflow-x-auto">
         {items.map((item) => {
           const active = isActive(item.href);
           const Icon = active ? item.iconActive : item.icon;
@@ -40,7 +40,7 @@ function MobileBottomNav({ hidden, isAdmin }: { hidden: boolean; isAdmin: boolea
               onClick={() => router.push(item.href)}
               disabled={item.disabled}
               className={cn(
-                "flex min-w-0 flex-col items-center gap-1 rounded-2xl px-1 py-1.5 text-[11px] font-semibold transition-colors",
+                "flex min-w-[78px] shrink-0 grow basis-0 flex-col items-center gap-1 rounded-2xl px-1 py-1.5 text-[11px] font-semibold transition-colors",
                 active
                   ? "text-slate-950 dark:text-white"
                   : "text-slate-500 active:bg-slate-100 dark:text-slate-400 dark:active:bg-white/10",

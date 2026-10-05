@@ -7,6 +7,7 @@ import {
   ArrowPathIcon,
   BanknotesIcon,
   CheckCircleIcon,
+  CheckIcon,
   CreditCardIcon,
   DevicePhoneMobileIcon,
   MagnifyingGlassIcon,
@@ -32,10 +33,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
+import { PriceSelectorDropdown, type PriceType } from "@/components/chat/PriceSelectorDropdown"
 import { authFetch } from "@/lib/auth/auth-fetch"
 import { isValidPeruvianMobile, normalizePeruvianMobile, sanitizePeruvianMobileInput } from "@/lib/crm/phone"
 
-type PriceType = "normal" | "oferta" | "mayor"
 type DiscountMode = "none" | "percent" | "amount"
 type SaleStep = "cart" | "payment"
 
@@ -1037,6 +1038,20 @@ export function CrmQuickSalePanelFlow({
                 }),
               )
             }}
+            onEditPrice={(id, newPrice) => {
+              if (cartLocked) {
+                toast.error("El pedido reservado no se puede modificar")
+                return
+              }
+              if (aiSaleDraft?.status === "IMPORTED") setAiDraftDirty(true)
+              setCart((current) =>
+                current.map((item) =>
+                  item.idProductoVariante === id
+                    ? { ...item, precio: newPrice, priceType: "editado" }
+                    : item,
+                ),
+              )
+            }}
           />
         )}
       </div>
@@ -1248,6 +1263,7 @@ function CartStep({
   onUpdateQty,
   onRemove,
   onPriceChange,
+  onEditPrice,
 }: {
   cart: CartItem[]
   totalItems: number
@@ -1269,8 +1285,31 @@ function CartStep({
   onUpdateQty: (id: number, delta: number) => void
   onRemove: (id: number) => void
   onPriceChange: (id: number, type: PriceType) => void
+  onEditPrice: (id: number, newPrice: number) => void
 }) {
   const [discountOpen, setDiscountOpen] = useState(false)
+  const [editingPriceId, setEditingPriceId] = useState<number | null>(null)
+  const [priceDraft, setPriceDraft] = useState("")
+
+  const startEditingPrice = (item: CartItem) => {
+    setPriceDraft(item.precio.toFixed(2))
+    setEditingPriceId(item.idProductoVariante)
+  }
+
+  const cancelEditingPrice = () => {
+    setEditingPriceId(null)
+    setPriceDraft("")
+  }
+
+  const confirmEditingPrice = (id: number) => {
+    const parsed = parseFloat(priceDraft.replace(",", "."))
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      cancelEditingPrice()
+      return
+    }
+    onEditPrice(id, Math.round(parsed * 100) / 100)
+    cancelEditingPrice()
+  }
   const hasDiscount = discountAmount > 0
   const showTaxBreakdown = ["FACTURA", "BOLETA"].includes(
     String(selectedComprobante?.tipoComprobante ?? "").trim().toUpperCase(),
@@ -1333,17 +1372,54 @@ function CartStep({
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-xs font-bold text-slate-900 dark:text-slate-100">{item.nombre}</p>
                     <p className="truncate text-[10px] text-slate-500">{item.color} · {item.talla}</p>
-                    <select
-                      value={item.priceType}
-                      onChange={(event) => onPriceChange(item.idProductoVariante, event.target.value as PriceType)}
-                      className="mt-1 h-7 max-w-full rounded-lg border border-slate-200 bg-white px-2 text-[10px] font-semibold dark:border-slate-700 dark:bg-slate-900"
-                    >
-                      {item.prices.map((price) => (
-                        <option key={price.type} value={price.type}>
-                          {price.label} {money(price.value)}
-                        </option>
-                      ))}
-                    </select>
+                    {editingPriceId === item.idProductoVariante ? (
+                      <div className="mt-1 flex items-center gap-1">
+                        <span className="text-[10px] text-slate-400">S/</span>
+                        <input
+                          autoFocus
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={priceDraft}
+                          onChange={(event) => setPriceDraft(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") confirmEditingPrice(item.idProductoVariante)
+                            if (event.key === "Escape") cancelEditingPrice()
+                          }}
+                          onBlur={() => confirmEditingPrice(item.idProductoVariante)}
+                          className="h-7 w-20 rounded-md border border-blue-400 bg-white px-1.5 text-xs font-bold tabular-nums text-slate-800 outline-none focus:ring-1 focus:ring-blue-500 dark:border-blue-500 dark:bg-slate-900 dark:text-slate-100"
+                        />
+                        <button
+                          type="button"
+                          onMouseDown={(event) => { event.preventDefault(); confirmEditingPrice(item.idProductoVariante) }}
+                          className="flex items-center justify-center rounded-md p-0.5 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30"
+                          aria-label="Confirmar precio"
+                        >
+                          <CheckIcon className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onMouseDown={(event) => { event.preventDefault(); cancelEditingPrice() }}
+                          className="flex items-center justify-center rounded-md p-0.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700"
+                          aria-label="Cancelar edicion de precio"
+                        >
+                          <XMarkIcon className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="mt-1 flex items-center gap-2">
+                        <span className="text-xs font-bold tabular-nums text-slate-700 dark:text-slate-200">
+                          {money(item.precio)}
+                        </span>
+                        <PriceSelectorDropdown
+                          options={item.prices}
+                          selectedType={item.priceType}
+                          onSelect={(type) => onPriceChange(item.idProductoVariante, type)}
+                          onEditPrice={() => startEditingPrice(item)}
+                          triggerLabel={`Cambiar precio para ${item.nombre}`}
+                        />
+                      </div>
+                    )}
                   </div>
                   <div className="flex shrink-0 flex-col items-end justify-between">
                     <button type="button" onClick={() => onRemove(item.idProductoVariante)} className="text-slate-400 hover:text-rose-500">

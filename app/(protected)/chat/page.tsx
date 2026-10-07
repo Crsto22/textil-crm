@@ -97,7 +97,7 @@ const MESSAGE_CACHE_LIMIT = 5;
 type ConversationStatus = "ESPERA" | "ATENDIDO" | "RESUELTO";
 type AiAttentionMode = "AUTOMATICA" | "HUMANA";
 type AttentionQueue = "AI_ACTIVE" | "ADVISOR_REQUIRED" | "PAYMENT_VERIFICATION" | "HUMAN_ACTIVE" | "RESOLVED";
-type WaitingReason = "ADVISOR_REQUIRED" | "PAYMENT_VERIFICATION" | "AI_DISABLED" | "IMAGE_RECEIVED";
+type WaitingReason = "ADVISOR_REQUIRED" | "PAYMENT_VERIFICATION" | "AI_DISABLED" | "IMAGE_RECEIVED" | "AI_RESPONSE_FAILED";
 
 type CrmConversation = Conversation & {
   phone: string;
@@ -112,6 +112,7 @@ type CrmConversation = Conversation & {
   aiAttentionMode: AiAttentionMode;
   attentionQueue: AttentionQueue;
   waitingReason: WaitingReason | null;
+  waitingDetail: string | null;
   tags: ConversationTag[];
   lastMessageType: CrmMessageResponse["messageType"] | null;
 };
@@ -133,6 +134,7 @@ interface CrmConversationResponse {
   aiAttentionMode?: AiAttentionMode | null;
   attentionQueue?: AttentionQueue | null;
   waitingReason?: WaitingReason | null;
+  waitingDetail?: string | null;
   tags?: CrmConversationTagResponse[] | null;
 }
 
@@ -213,6 +215,7 @@ interface CrmRealtimeEvent {
   status?: string;
   requiresHuman?: boolean;
   reason?: string;
+  waitingReason?: WaitingReason;
   memory?: AiMemoryResponse;
   connection?: WhatsappConnectionState;
   data?: unknown;
@@ -412,6 +415,7 @@ const mapConversation = (conversation: CrmConversationResponse): CrmConversation
         : conversation.assignedUserId ? "HUMAN_ACTIVE"
           : conversation.aiAttentionMode === "HUMANA" ? "ADVISOR_REQUIRED" : "AI_ACTIVE"),
     waitingReason: conversation.waitingReason ?? null,
+    waitingDetail: conversation.waitingDetail ?? null,
     tags: (conversation.tags ?? []).map(mapConversationTag),
   };
 };
@@ -1185,17 +1189,21 @@ function ConversationRow({
         </div>
         {conversation.waitingReason && (
           <span className={cn(
-            "mt-1.5 inline-flex items-center rounded px-2 py-0.5 text-[10px] font-semibold",
+            "mt-1.5 inline-flex max-w-full items-center rounded px-2 py-0.5 text-left text-[10px] font-semibold leading-snug",
             conversation.waitingReason === "PAYMENT_VERIFICATION"
               ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
               : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
-          )}>
-            {conversation.waitingReason === "PAYMENT_VERIFICATION"
+          )} title={conversation.waitingDetail ?? undefined}>
+            {conversation.waitingDetail
+              ? conversation.waitingDetail
+              : conversation.waitingReason === "PAYMENT_VERIFICATION"
               ? "Verificacion de pago"
               : conversation.waitingReason === "AI_DISABLED"
                 ? "IA desactivada"
                 : conversation.waitingReason === "IMAGE_RECEIVED"
                   ? "Imagen recibida"
+                : conversation.waitingReason === "AI_RESPONSE_FAILED"
+                  ? "La IA no pudo responder"
                 : "Necesita asesor"}
           </span>
         )}
@@ -2934,6 +2942,8 @@ export default function ChatPage() {
         return;
       }
       if (event.type === "ai.handoff.required") {
+        const waitingReason = event.waitingReason ?? "ADVISOR_REQUIRED";
+        const waitingDetail = event.reason?.trim() || null;
         if (activeConversationIdRef.current === conversationId) {
           aiPanelConversationRef.current = null;
           setIsAiPanelOpen(false);
@@ -2948,7 +2958,8 @@ export default function ChatPage() {
                 status: "ESPERA" as const,
                 aiAttentionMode: "HUMANA" as const,
                 attentionQueue: "ADVISOR_REQUIRED" as const,
-                waitingReason: "ADVISOR_REQUIRED" as const,
+                waitingReason,
+                waitingDetail,
               }
             : conversation);
           conversationsRef.current = next;
@@ -2963,7 +2974,8 @@ export default function ChatPage() {
                   status: "ESPERA" as const,
                   aiAttentionMode: "HUMANA" as const,
                   attentionQueue: "ADVISOR_REQUIRED" as const,
-                  waitingReason: "ADVISOR_REQUIRED" as const,
+                  waitingReason,
+                  waitingDetail,
                 }
               : conversation),
           };
@@ -5561,7 +5573,11 @@ export default function ChatPage() {
                   <span>Humano</span>
                 </button>
               </div>
-              {!globalAutomaticEnabled ? (
+              {activeConversation?.waitingDetail ? (
+                <p className="max-w-56 whitespace-normal px-1 text-[9px] leading-snug text-amber-700 dark:text-amber-300" title={activeConversation.waitingDetail}>
+                  {activeConversation.waitingDetail}
+                </p>
+              ) : !globalAutomaticEnabled ? (
                 <p className="truncate px-1 text-[9px] text-amber-700 dark:text-amber-300" title={globalAiDisabledReason}>
                   {globalAiDisabledReason}
                 </p>

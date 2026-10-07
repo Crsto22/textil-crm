@@ -61,6 +61,7 @@ interface WhatsappQrResponse extends WhatsappStatus {
 
 type AiMode = "DESACTIVADA" | "SUGERENCIAS" | "AUTOMATICA"
 type AiTone = "CERCANO" | "FORMAL" | "COMERCIAL" | "PERSONALIZADO"
+type DeliveryDateMode = "AUTOMATICA" | "FECHA_ESPECIFICA"
 
 interface AiConfig {
   connectionConfigured: boolean
@@ -91,6 +92,13 @@ interface AiConfig {
   automaticRolloutPercent: number
   naturalResponseEnabled: boolean
   naturalResponseRolloutPercent: number
+  shippingDateMode: DeliveryDateMode
+  shippingSpecificDate: string | null
+  sameDayShippingCutoff: string
+  pickupDateMode: DeliveryDateMode
+  pickupSpecificDate: string | null
+  pickupOpensAt: string
+  pickupClosesAt: string
   operational: AiOperationalStatus
   horariosComerciales: BusinessHours[]
   reglasSeguridad: string[]
@@ -110,6 +118,13 @@ function normalizeAiConfig(config: AiConfig): AiConfig {
       && naturalRollout <= 100
       ? naturalRollout
       : 0,
+    shippingDateMode: config.shippingDateMode ?? "AUTOMATICA",
+    shippingSpecificDate: config.shippingSpecificDate ?? null,
+    sameDayShippingCutoff: config.sameDayShippingCutoff ?? "15:00",
+    pickupDateMode: config.pickupDateMode ?? "AUTOMATICA",
+    pickupSpecificDate: config.pickupSpecificDate ?? null,
+    pickupOpensAt: config.pickupOpensAt ?? "10:00",
+    pickupClosesAt: config.pickupClosesAt ?? "18:00",
   }
 }
 
@@ -131,6 +146,44 @@ interface BusinessHours {
   cerrado: boolean
   horaApertura: string
   horaCierre: string
+}
+
+function DeliveryScheduleSettings({ config, onChange }: { config: AiConfig; onChange: (next: AiConfig) => void }) {
+  const dateMode = (
+    label: string,
+    mode: DeliveryDateMode,
+    date: string | null,
+    update: (mode: DeliveryDateMode, date: string | null) => void,
+  ) => (
+    <div className="space-y-2">
+      <p className="text-xs font-semibold">{label}</p>
+      <div className="grid grid-cols-2 gap-2">
+        <button type="button" onClick={() => update("AUTOMATICA", null)} className={`h-9 rounded-lg border text-xs font-semibold ${mode === "AUTOMATICA" ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background"}`}>Automática</button>
+        <button type="button" onClick={() => update("FECHA_ESPECIFICA", date)} className={`h-9 rounded-lg border text-xs font-semibold ${mode === "FECHA_ESPECIFICA" ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background"}`}>Fecha específica</button>
+      </div>
+      {mode === "FECHA_ESPECIFICA" && <input type="date" value={date ?? ""} onChange={(event) => update(mode, event.target.value || null)} className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs" />}
+      {mode === "AUTOMATICA" && <p className="text-[10px] text-muted-foreground">Usa hoy antes de la hora límite y mañana cuando el horario ya terminó.</p>}
+    </div>
+  )
+
+  return (
+    <section className="space-y-4 rounded-2xl border border-border bg-background p-4 shadow-sm">
+      <div><h4 className="text-sm font-semibold">Despachos y recojos</h4><p className="text-xs text-muted-foreground">Fechas que IA Kiments comunicará para productos listos para entrega. Las preventas conservan la fecha de cada producto.</p></div>
+      <div className="grid gap-5 lg:grid-cols-2">
+        <div className="space-y-3 rounded-lg border border-border p-3">
+          {dateMode("Envíos por Shalom", config.shippingDateMode, config.shippingSpecificDate, (mode, date) => onChange({ ...config, shippingDateMode: mode, shippingSpecificDate: date }))}
+          <label className="block space-y-1 text-xs font-medium">Confirmar pedido hasta<input type="time" value={config.sameDayShippingCutoff} onChange={(event) => onChange({ ...config, sameDayShippingCutoff: event.target.value })} className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs" /></label>
+        </div>
+        <div className="space-y-3 rounded-lg border border-border p-3">
+          {dateMode("Recojo en La Victoria", config.pickupDateMode, config.pickupSpecificDate, (mode, date) => onChange({ ...config, pickupDateMode: mode, pickupSpecificDate: date }))}
+          <div className="grid grid-cols-2 gap-2">
+            <label className="space-y-1 text-xs font-medium">Abre desde<input type="time" value={config.pickupOpensAt} onChange={(event) => onChange({ ...config, pickupOpensAt: event.target.value })} className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs" /></label>
+            <label className="space-y-1 text-xs font-medium">Recojo hasta<input type="time" value={config.pickupClosesAt} onChange={(event) => onChange({ ...config, pickupClosesAt: event.target.value })} className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs" /></label>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
 }
 
 interface AiCredentials {
@@ -517,6 +570,22 @@ export default function ConexionesPage() {
       toast.error("El despliegue de redaccion natural debe estar entre 0% y 100%")
       return
     }
+    if (aiConfig.shippingDateMode === "FECHA_ESPECIFICA" && !aiConfig.shippingSpecificDate) {
+      toast.error("Selecciona la fecha especifica de envio")
+      return
+    }
+    if (aiConfig.pickupDateMode === "FECHA_ESPECIFICA" && !aiConfig.pickupSpecificDate) {
+      toast.error("Selecciona la fecha especifica de recojo")
+      return
+    }
+    if (!aiConfig.sameDayShippingCutoff || !aiConfig.pickupOpensAt || !aiConfig.pickupClosesAt) {
+      toast.error("Completa los horarios de envio y recojo")
+      return
+    }
+    if (aiConfig.pickupOpensAt >= aiConfig.pickupClosesAt) {
+      toast.error("La apertura debe ser anterior a la hora maxima de recojo")
+      return
+    }
     setIsSavingAi(true)
     try {
       const response = await authFetch("/api/crm/whatsapp/connection/ai-config", {
@@ -547,6 +616,13 @@ export default function ConexionesPage() {
           automaticRolloutPercent: aiConfig.automaticRolloutPercent,
           naturalResponseEnabled: aiConfig.naturalResponseEnabled,
           naturalResponseRolloutPercent,
+          shippingDateMode: aiConfig.shippingDateMode,
+          shippingSpecificDate: aiConfig.shippingDateMode === "FECHA_ESPECIFICA" ? aiConfig.shippingSpecificDate : null,
+          sameDayShippingCutoff: aiConfig.sameDayShippingCutoff,
+          pickupDateMode: aiConfig.pickupDateMode,
+          pickupSpecificDate: aiConfig.pickupDateMode === "FECHA_ESPECIFICA" ? aiConfig.pickupSpecificDate : null,
+          pickupOpensAt: aiConfig.pickupOpensAt,
+          pickupClosesAt: aiConfig.pickupClosesAt,
         }),
       })
       if (!response.ok) throw new Error(await readMessage(response, "No se pudo guardar la configuracion de IA Kiments"))
@@ -803,6 +879,8 @@ export default function ConexionesPage() {
                   <label className="flex items-start gap-2 rounded-lg border border-border px-3 py-2 text-xs"><input type="checkbox" checked={aiConfig.mandarCatalogoImagenes} onChange={(event) => setAiConfig({ ...aiConfig, mandarCatalogoImagenes: event.target.checked })} className="mt-0.5 h-4 w-4 accent-primary" /><span><span className="block font-medium">Mandar catálogo con imágenes</span><span className="mt-0.5 block text-[10px] text-muted-foreground">Cuando una clienta pida el catálogo o pregunte qué productos venden, se enviarán los 3 productos más recientes con su imagen global antes de la respuesta de la IA.</span></span></label>
                   <label className="flex items-start gap-2 rounded-lg border border-border px-3 py-2 text-xs"><input type="checkbox" checked={aiConfig.sugerirPromocionesCarrito} onChange={(event) => setAiConfig({ ...aiConfig, sugerirPromocionesCarrito: event.target.checked })} className="mt-0.5 h-4 w-4 accent-primary" /><span><span className="block font-medium">Sugerir promociones después del carrito</span><span className="mt-0.5 block text-[10px] text-muted-foreground">Después del resumen se recomendarán hasta 3 promociones reales con descuento.</span></span></label>
                 </section>
+
+                <DeliveryScheduleSettings config={aiConfig} onChange={setAiConfig} />
 
                 <section className="overflow-hidden rounded-2xl border border-border bg-background shadow-sm">
                   <button type="button" aria-expanded={isIntentionsOpen} aria-controls="ai-intentions-content" onClick={() => setIsIntentionsOpen((current) => !current)} className="flex w-full items-center gap-3 p-4 text-left transition hover:bg-muted/30">

@@ -79,15 +79,38 @@ interface AiConfig {
   transferirBajaConfianza: boolean
   transferirSolicitudHumana: boolean
   transferirAsuntoSensible: boolean
+  transferirImagenesAsesora: boolean
+  mostrarProductosNuevos: boolean
+  mandarCatalogoImagenes: boolean
+  sugerirPromocionesCarrito: boolean
   dailyTokenLimit: number | null
   monthlyTokenLimit: number | null
   monthlyBudgetUsd: number | null
   inputCostPerMillionUsd: number | null
   outputCostPerMillionUsd: number | null
   automaticRolloutPercent: number
+  naturalResponseEnabled: boolean
+  naturalResponseRolloutPercent: number
   operational: AiOperationalStatus
   horariosComerciales: BusinessHours[]
   reglasSeguridad: string[]
+}
+
+function normalizeAiConfig(config: AiConfig): AiConfig {
+  const naturalRollout = Number(config.naturalResponseRolloutPercent)
+  return {
+    ...config,
+    transferirImagenesAsesora: config.transferirImagenesAsesora ?? false,
+    mostrarProductosNuevos: config.mostrarProductosNuevos ?? false,
+    mandarCatalogoImagenes: config.mandarCatalogoImagenes ?? false,
+    sugerirPromocionesCarrito: config.sugerirPromocionesCarrito ?? false,
+    naturalResponseEnabled: config.naturalResponseEnabled ?? false,
+    naturalResponseRolloutPercent: Number.isInteger(naturalRollout)
+      && naturalRollout >= 0
+      && naturalRollout <= 100
+      ? naturalRollout
+      : 0,
+  }
 }
 
 interface AiOperationalStatus {
@@ -290,7 +313,7 @@ export default function ConexionesPage() {
     try {
       const response = await authFetch("/api/crm/whatsapp/connection/ai-config", { cache: "no-store" })
       if (!response.ok) throw new Error(await readMessage(response, "No se pudo cargar la configuracion de IA Kiments"))
-      setAiConfig((await response.json()) as AiConfig)
+      setAiConfig(normalizeAiConfig((await response.json()) as AiConfig))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "No se pudo cargar la configuracion de IA Kiments")
     } finally {
@@ -452,6 +475,17 @@ export default function ConexionesPage() {
     })
   }
 
+  const toggleNaturalResponse = (enabled: boolean) => {
+    setAiConfig((current) => current ? {
+      ...current,
+      naturalResponseEnabled: enabled,
+      naturalResponseRolloutPercent: enabled && (!Number.isFinite(current.naturalResponseRolloutPercent)
+        || current.naturalResponseRolloutPercent <= 0)
+        ? 100
+        : current.naturalResponseRolloutPercent,
+    } : current)
+  }
+
   const handleSaveAi = async () => {
     if (!aiConfig) return
     if (!aiConfig.connectionConfigured) {
@@ -476,6 +510,13 @@ export default function ConexionesPage() {
       toast.error(`El maximo debe estar entre ${MIN_AI_AUTOMATIC_RESPONSES} y ${MAX_AI_AUTOMATIC_RESPONSES} respuestas`)
       return
     }
+    const naturalResponseRolloutPercent = Number(aiConfig.naturalResponseRolloutPercent)
+    if (!Number.isInteger(naturalResponseRolloutPercent)
+      || naturalResponseRolloutPercent < 0
+      || naturalResponseRolloutPercent > 100) {
+      toast.error("El despliegue de redaccion natural debe estar entre 0% y 100%")
+      return
+    }
     setIsSavingAi(true)
     try {
       const response = await authFetch("/api/crm/whatsapp/connection/ai-config", {
@@ -494,16 +535,22 @@ export default function ConexionesPage() {
           maxRespuestasAutomaticas: maxAutomaticResponses,
           confianzaMinima: aiConfig.confianzaMinima,
           transferirBajaConfianza: aiConfig.transferirBajaConfianza,
+          transferirImagenesAsesora: aiConfig.transferirImagenesAsesora,
+          mostrarProductosNuevos: aiConfig.mostrarProductosNuevos,
+          mandarCatalogoImagenes: aiConfig.mandarCatalogoImagenes,
+          sugerirPromocionesCarrito: aiConfig.sugerirPromocionesCarrito,
           dailyTokenLimit: aiConfig.dailyTokenLimit,
           monthlyTokenLimit: aiConfig.monthlyTokenLimit,
           monthlyBudgetUsd: aiConfig.monthlyBudgetUsd,
           inputCostPerMillionUsd: aiConfig.inputCostPerMillionUsd,
           outputCostPerMillionUsd: aiConfig.outputCostPerMillionUsd,
           automaticRolloutPercent: aiConfig.automaticRolloutPercent,
+          naturalResponseEnabled: aiConfig.naturalResponseEnabled,
+          naturalResponseRolloutPercent,
         }),
       })
       if (!response.ok) throw new Error(await readMessage(response, "No se pudo guardar la configuracion de IA Kiments"))
-      setAiConfig((await response.json()) as AiConfig)
+      setAiConfig(normalizeAiConfig((await response.json()) as AiConfig))
       toast.success("Configuracion de IA Kiments guardada")
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "No se pudo guardar la configuracion de IA Kiments")
@@ -737,9 +784,24 @@ export default function ConexionesPage() {
                     <label className="space-y-1 text-xs font-medium">Zona horaria<input value={aiConfig.zonaHoraria} readOnly className="h-10 w-full rounded-lg border border-input bg-muted/40 px-3 text-xs" /></label>
                   </div>
                   {aiConfig.tono === "PERSONALIZADO" && <label className="block space-y-1 text-xs font-medium">Instrucciones<textarea value={aiConfig.instruccionesPersonalizadas} maxLength={1000} onChange={(event) => setAiConfig({ ...aiConfig, instruccionesPersonalizadas: event.target.value })} className="min-h-24 w-full resize-y rounded-lg border border-input bg-background px-3 py-2 text-xs outline-none focus:border-primary" /><span className="block text-right text-[10px] text-muted-foreground">{aiConfig.instruccionesPersonalizadas.length}/1000</span></label>}
+                  <div className="space-y-3 rounded-lg border border-border p-3">
+                    <label className="flex items-start gap-3 text-xs">
+                      <input type="checkbox" checked={aiConfig.naturalResponseEnabled} onChange={(event) => toggleNaturalResponse(event.target.checked)} className="mt-0.5 h-4 w-4 accent-primary" />
+                      <span><span className="block font-semibold">Redaccion natural</span><span className="mt-0.5 block text-[10px] text-muted-foreground">Gemini redacta respuestas informativas usando exclusivamente los datos validados del negocio.</span></span>
+                    </label>
+                    <label className="block space-y-1 text-xs font-medium">Despliegue de redaccion natural: {aiConfig.naturalResponseRolloutPercent}%<input type="range" min={0} max={100} step={5} value={aiConfig.naturalResponseRolloutPercent} disabled={!aiConfig.naturalResponseEnabled} onChange={(event) => setAiConfig({ ...aiConfig, naturalResponseRolloutPercent: Number(event.target.value) })} className="h-2 w-full accent-primary disabled:opacity-40" /></label>
+                    <div className="grid gap-2 text-[10px] sm:grid-cols-2">
+                      <div className="rounded-md bg-muted/40 p-2"><span className="font-semibold">Respuesta segura</span><p className="mt-1 text-muted-foreground">Productos disponibles: BELEN, EMMA y LYANA.</p></div>
+                      <div className="rounded-md bg-primary/5 p-2"><span className="font-semibold text-primary">Respuesta natural</span><p className="mt-1 text-muted-foreground">Claro, bella. Tenemos BELEN, EMMA y LYANA disponibles. Dime cual deseas conocer.</p></div>
+                    </div>
+                  </div>
                   <div className="space-y-2"><p className="text-xs font-semibold">Dias y horario operativo</p><div className="grid grid-cols-7 gap-1">{AI_DAYS.map(([value, label]) => <button key={value} type="button" onClick={() => toggleAiListValue("diasAtencion", value)} className={`rounded-md border px-1 py-2 text-[9px] font-semibold ${aiConfig.diasAtencion.includes(value) ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground"}`}>{label}</button>)}</div><div className="grid grid-cols-2 gap-2"><label className="space-y-1 text-[10px] text-muted-foreground">Desde<input type="time" value={aiConfig.horaInicio} onChange={(event) => setAiConfig({ ...aiConfig, horaInicio: event.target.value })} className="h-9 w-full rounded-lg border border-input bg-background px-2 text-xs" /></label><label className="space-y-1 text-[10px] text-muted-foreground">Hasta<input type="time" value={aiConfig.horaFin} onChange={(event) => setAiConfig({ ...aiConfig, horaFin: event.target.value })} className="h-9 w-full rounded-lg border border-input bg-background px-2 text-xs" /></label></div></div>
                   <div className="grid gap-3 sm:grid-cols-3"><label className="space-y-1 text-xs font-medium">Espera (seg.)<input type="number" min={MIN_AI_RESPONSE_DELAY_SECONDS} max={MAX_AI_RESPONSE_DELAY_SECONDS} value={aiConfig.esperaRespuestaSegundos} onChange={(event) => setAiConfig({ ...aiConfig, esperaRespuestaSegundos: Number(event.target.value) })} className="h-9 w-full rounded-lg border border-input bg-background px-2 text-xs" /></label><label className="space-y-1 text-xs font-medium">Max. respuestas<input type="number" min={MIN_AI_AUTOMATIC_RESPONSES} max={MAX_AI_AUTOMATIC_RESPONSES} value={aiConfig.maxRespuestasAutomaticas} onChange={(event) => setAiConfig({ ...aiConfig, maxRespuestasAutomaticas: Number(event.target.value) })} className="h-9 w-full rounded-lg border border-input bg-background px-2 text-xs" /></label><label className="space-y-1 text-xs font-medium">Confianza minima<input type="number" min={50} max={95} value={aiConfig.confianzaMinima} onChange={(event) => setAiConfig({ ...aiConfig, confianzaMinima: Number(event.target.value) })} className="h-9 w-full rounded-lg border border-input bg-background px-2 text-xs" /></label></div>
                   <label className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs"><input type="checkbox" checked={aiConfig.transferirBajaConfianza} onChange={(event) => setAiConfig({ ...aiConfig, transferirBajaConfianza: event.target.checked })} className="h-4 w-4 accent-primary" />Transferir cuando la confianza sea baja</label>
+                  <label className="flex items-start gap-2 rounded-lg border border-border px-3 py-2 text-xs"><input type="checkbox" checked={aiConfig.transferirImagenesAsesora} onChange={(event) => setAiConfig({ ...aiConfig, transferirImagenesAsesora: event.target.checked })} className="mt-0.5 h-4 w-4 accent-primary" /><span><span className="block font-medium">Enviar conversaciones con imágenes a una asesora</span><span className="mt-0.5 block text-[10px] text-muted-foreground">Cuando una clienta envíe una imagen, el chat pasará a una asesora sin responder automáticamente.</span></span></label>
+                  <label className="flex items-start gap-2 rounded-lg border border-border px-3 py-2 text-xs"><input type="checkbox" checked={aiConfig.mostrarProductosNuevos} onChange={(event) => setAiConfig({ ...aiConfig, mostrarProductosNuevos: event.target.checked })} className="mt-0.5 h-4 w-4 accent-primary" /><span><span className="block font-medium">Mostrar productos nuevos al iniciar un chat</span><span className="mt-0.5 block text-[10px] text-muted-foreground">En el primer contacto se enviarán los productos creados durante las últimas 72 horas, incluyendo preventa y fecha de envío.</span></span></label>
+                  <label className="flex items-start gap-2 rounded-lg border border-border px-3 py-2 text-xs"><input type="checkbox" checked={aiConfig.mandarCatalogoImagenes} onChange={(event) => setAiConfig({ ...aiConfig, mandarCatalogoImagenes: event.target.checked })} className="mt-0.5 h-4 w-4 accent-primary" /><span><span className="block font-medium">Mandar catálogo con imágenes</span><span className="mt-0.5 block text-[10px] text-muted-foreground">Cuando una clienta pida el catálogo o pregunte qué productos venden, se enviarán los 3 productos más recientes con su imagen global antes de la respuesta de la IA.</span></span></label>
+                  <label className="flex items-start gap-2 rounded-lg border border-border px-3 py-2 text-xs"><input type="checkbox" checked={aiConfig.sugerirPromocionesCarrito} onChange={(event) => setAiConfig({ ...aiConfig, sugerirPromocionesCarrito: event.target.checked })} className="mt-0.5 h-4 w-4 accent-primary" /><span><span className="block font-medium">Sugerir promociones después del carrito</span><span className="mt-0.5 block text-[10px] text-muted-foreground">Después del resumen se recomendarán hasta 3 promociones reales con descuento.</span></span></label>
                 </section>
 
                 <section className="overflow-hidden rounded-2xl border border-border bg-background shadow-sm">
@@ -1078,6 +1140,14 @@ export default function ConexionesPage() {
                             </label>
                           )}
 
+                          <div className="space-y-3 rounded-lg border border-border p-3">
+                            <label className="flex items-start gap-3 text-xs">
+                              <input type="checkbox" checked={aiConfig.naturalResponseEnabled} onChange={(event) => toggleNaturalResponse(event.target.checked)} className="mt-0.5 h-4 w-4 accent-primary" />
+                              <span><span className="block font-semibold">Redaccion natural</span><span className="mt-0.5 block text-[10px] text-muted-foreground">Redacta consultas informativas con Gemini y conserva respuestas seguras como respaldo.</span></span>
+                            </label>
+                            <label className="block space-y-1 text-[10px] font-medium">Despliegue: {aiConfig.naturalResponseRolloutPercent}%<input type="range" min={0} max={100} step={5} value={aiConfig.naturalResponseRolloutPercent} disabled={!aiConfig.naturalResponseEnabled} onChange={(event) => setAiConfig({ ...aiConfig, naturalResponseRolloutPercent: Number(event.target.value) })} className="h-2 w-full accent-primary disabled:opacity-40" /></label>
+                          </div>
+
                           <div className="space-y-2">
                             <p className="text-xs font-semibold">Dias y horario</p>
                             <div className="grid grid-cols-7 gap-1">
@@ -1117,6 +1187,26 @@ export default function ConexionesPage() {
                           <label className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs">
                             <input type="checkbox" checked={aiConfig.transferirBajaConfianza} onChange={(event) => setAiConfig({ ...aiConfig, transferirBajaConfianza: event.target.checked })} className="h-4 w-4 accent-primary" />
                             Transferir cuando la confianza sea baja
+                          </label>
+
+                          <label className="flex items-start gap-2 rounded-lg border border-border px-3 py-2 text-xs">
+                            <input type="checkbox" checked={aiConfig.transferirImagenesAsesora} onChange={(event) => setAiConfig({ ...aiConfig, transferirImagenesAsesora: event.target.checked })} className="mt-0.5 h-4 w-4 accent-primary" />
+                            <span><span className="block font-medium">Enviar conversaciones con imágenes a una asesora</span><span className="mt-0.5 block text-[10px] text-muted-foreground">Cuando una clienta envíe una imagen, el chat pasará a una asesora sin responder automáticamente.</span></span>
+                          </label>
+
+                          <label className="flex items-start gap-2 rounded-lg border border-border px-3 py-2 text-xs">
+                            <input type="checkbox" checked={aiConfig.mostrarProductosNuevos} onChange={(event) => setAiConfig({ ...aiConfig, mostrarProductosNuevos: event.target.checked })} className="mt-0.5 h-4 w-4 accent-primary" />
+                            <span><span className="block font-medium">Mostrar productos nuevos al iniciar un chat</span><span className="mt-0.5 block text-[10px] text-muted-foreground">En el primer contacto se enviarán los productos creados durante las últimas 72 horas, incluyendo preventa y fecha de envío.</span></span>
+                          </label>
+
+                          <label className="flex items-start gap-2 rounded-lg border border-border px-3 py-2 text-xs">
+                            <input type="checkbox" checked={aiConfig.mandarCatalogoImagenes} onChange={(event) => setAiConfig({ ...aiConfig, mandarCatalogoImagenes: event.target.checked })} className="mt-0.5 h-4 w-4 accent-primary" />
+                            <span><span className="block font-medium">Mandar catálogo con imágenes</span><span className="mt-0.5 block text-[10px] text-muted-foreground">Cuando una clienta pida el catálogo o pregunte qué productos venden, se enviarán los 3 productos más recientes con su imagen global antes de la respuesta de la IA.</span></span>
+                          </label>
+
+                          <label className="flex items-start gap-2 rounded-lg border border-border px-3 py-2 text-xs">
+                            <input type="checkbox" checked={aiConfig.sugerirPromocionesCarrito} onChange={(event) => setAiConfig({ ...aiConfig, sugerirPromocionesCarrito: event.target.checked })} className="mt-0.5 h-4 w-4 accent-primary" />
+                            <span><span className="block font-medium">Sugerir promociones después del carrito</span><span className="mt-0.5 block text-[10px] text-muted-foreground">Después del resumen se recomendarán hasta 3 promociones reales con descuento.</span></span>
                           </label>
 
                           <section className="space-y-3 border-y border-border py-4">

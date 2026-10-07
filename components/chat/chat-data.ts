@@ -13,7 +13,7 @@ export type MessageQuote = {
   id: string;
   direction: "INCOMING" | "OUTGOING" | "SYSTEM";
   body: string;
-  messageType: "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "DOCUMENT" | "MEDIA";
+  messageType: "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "DOCUMENT" | "MEDIA" | "STICKER" | "VIEW_ONCE";
   deleted?: boolean;
 };
 
@@ -44,6 +44,8 @@ export type ChatMessage = {
   deleted?: boolean;
   aiGenerated?: boolean;
   relatedSaleId?: number | null;
+  sticker?: boolean;
+  viewOnce?: boolean;
 };
 
 export const conversations: Conversation[] = [];

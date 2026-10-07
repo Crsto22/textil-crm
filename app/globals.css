@@ -208,4 +208,22 @@
   display: none;
 }
 
+/* WhatsApp-style bubbles for messages sent from Kiments. */
+.whatsapp-outgoing-bubble {
+  background-color: #d9fdd3;
+  color: #111b21;
+}
+
+.dark .whatsapp-outgoing-bubble {
+  background-color: #005c4b;
+  color: #e9edef;
+}
+
+.whatsapp-outgoing-meta {
+  color: #667781;
+}
+
+.dark .whatsapp-outgoing-meta {
+  color: #ffffff99;
+}
 

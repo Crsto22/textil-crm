@@ -97,7 +97,7 @@ const MESSAGE_CACHE_LIMIT = 5;
 type ConversationStatus = "ESPERA" | "ATENDIDO" | "RESUELTO";
 type AiAttentionMode = "AUTOMATICA" | "HUMANA";
 type AttentionQueue = "AI_ACTIVE" | "ADVISOR_REQUIRED" | "PAYMENT_VERIFICATION" | "HUMAN_ACTIVE" | "RESOLVED";
-type WaitingReason = "ADVISOR_REQUIRED" | "PAYMENT_VERIFICATION" | "AI_DISABLED";
+type WaitingReason = "ADVISOR_REQUIRED" | "PAYMENT_VERIFICATION" | "AI_DISABLED" | "IMAGE_RECEIVED";
 
 type CrmConversation = Conversation & {
   phone: string;
@@ -172,7 +172,7 @@ interface CrmMessageResponse {
   id: number;
   direction: "INCOMING" | "OUTGOING" | "SYSTEM";
   origin?: "EXTERNAL" | "HUMAN" | "CRM_SYSTEM" | "AI_AUTOMATIC";
-  messageType: "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "DOCUMENT" | "MEDIA";
+  messageType: "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "DOCUMENT" | "MEDIA" | "STICKER" | "VIEW_ONCE";
   body: string | null;
   status: ChatMessage["status"];
   createdAt: string | null;
@@ -184,7 +184,7 @@ interface CrmMessageResponse {
     id: number;
     direction: "INCOMING" | "OUTGOING" | "SYSTEM";
     body: string | null;
-    messageType: "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "DOCUMENT" | "MEDIA";
+    messageType: "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "DOCUMENT" | "MEDIA" | "STICKER" | "VIEW_ONCE";
     deleted?: boolean;
   } | null;
   deleted?: boolean;
@@ -444,7 +444,9 @@ const mapMessage = (
     };
   }
 
-  const hasMedia = Boolean(message.mediaUrl || message.mediaFileName || message.messageType !== "TEXT");
+  const isViewOnce = message.messageType === "VIEW_ONCE";
+  const isSticker = message.messageType === "STICKER";
+  const hasMedia = !isViewOnce && Boolean(message.mediaUrl || message.mediaFileName || message.messageType !== "TEXT");
   const isAudioContent =
     message.messageType === "AUDIO" ||
     isAudioFile(message.mediaMimeType || undefined, message.mediaFileName || undefined);
@@ -456,7 +458,9 @@ const mapMessage = (
 
   return {
     id: String(message.id),
-    type: isOutgoingAudio
+    type: isViewOnce
+      ? message.direction === "INCOMING" ? "incoming" : "outgoing"
+      : isOutgoingAudio
       ? "outgoing-audio"
       : isIncomingAudio
       ? "incoming-audio"
@@ -467,7 +471,9 @@ const mapMessage = (
       : message.direction === "INCOMING"
         ? "incoming"
         : "outgoing",
-    text: hasMedia ? mediaFileName || bodyText : bodyText,
+    text: isViewOnce
+      ? "No se puede abrir este mensaje porque fue enviado para ver una sola vez."
+      : hasMedia ? mediaFileName || bodyText : bodyText,
     time: formatChatTime(message.createdAt),
     status: message.status || "sent",
     aiGenerated: message.origin === "AI_AUTOMATIC",
@@ -485,6 +491,8 @@ const mapMessage = (
         }
       : null,
     deleted: Boolean(message.deleted),
+    sticker: isSticker,
+    viewOnce: isViewOnce,
   };
 };
 
@@ -1186,6 +1194,8 @@ function ConversationRow({
               ? "Verificacion de pago"
               : conversation.waitingReason === "AI_DISABLED"
                 ? "IA desactivada"
+                : conversation.waitingReason === "IMAGE_RECEIVED"
+                  ? "Imagen recibida"
                 : "Necesita asesor"}
           </span>
         )}
@@ -1523,6 +1533,10 @@ function MessageBubble({
     && Boolean(item.fileUrl);
   const visualMediaUrl = useAuthenticatedBlobUrl(item.fileUrl, isVisualMedia && isNearViewport);
   const authenticatedAudioUrl = useAuthenticatedBlobUrl(item.audioUrl, audioRequested);
+  const deletedPaymentMediaUrl = useAuthenticatedBlobUrl(
+    paymentReview ? `/api/crm/whatsapp/payment-evidences/${paymentReview.evidenceId}/media` : undefined,
+    Boolean(paymentReview && item.deleted),
+  );
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -1658,6 +1672,47 @@ function MessageBubble({
 
   if (item.deleted) {
     const outgoing = item.type === "outgoing" || item.type === "outgoing-file" || item.type === "outgoing-audio";
+    if (paymentReview) {
+      return (
+        <div className="mr-auto w-fit max-w-[88%] rounded-md border border-amber-300 bg-card p-1.5 text-sm text-card-foreground shadow-sm md:max-w-[55%]">
+          <div className="mb-1.5 flex items-center justify-between gap-3 px-1">
+            <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-1 text-[10px] font-bold not-italic text-amber-800 dark:bg-amber-500/15 dark:text-amber-200">
+              <ExclamationTriangleIcon className="h-3.5 w-3.5" />
+              Eliminado por el cliente
+            </span>
+            <span className="text-[10px] text-muted-foreground">{item.time}</span>
+          </div>
+          {deletedPaymentMediaUrl ? (
+            <button
+              type="button"
+              onClick={onOpenPaymentReview}
+              className="block h-56 w-[min(68vw,300px)] overflow-hidden rounded bg-muted"
+              aria-label="Abrir comprobante eliminado"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={deletedPaymentMediaUrl}
+                alt="Comprobante de pago eliminado por el cliente"
+                className="h-full w-full object-cover"
+              />
+            </button>
+          ) : (
+            <div className="flex h-32 w-[min(68vw,300px)] items-center justify-center rounded bg-muted px-4 text-center text-xs text-muted-foreground">
+              Comprobante conservado para revisión de pago
+            </div>
+          )}
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="mt-1.5 h-8 w-full border-emerald-300 bg-emerald-50 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300"
+            onClick={onOpenPaymentReview}
+          >
+            Ver pago
+          </Button>
+        </div>
+      );
+    }
     return (
       <div className={`w-fit max-w-[88%] rounded-md px-3 py-2 text-sm italic shadow-sm md:max-w-[55%] ${
         outgoing ? "whatsapp-outgoing-bubble ml-auto" : "mr-auto bg-card text-muted-foreground"
@@ -1670,9 +1725,28 @@ function MessageBubble({
     );
   }
 
+  if (item.viewOnce) {
+    const outgoing = item.type === "outgoing";
+    return (
+      <div className={cn(
+        "w-fit max-w-[88%] rounded-md px-3 py-2.5 text-sm shadow-sm md:max-w-[55%]",
+        outgoing ? "whatsapp-outgoing-bubble ml-auto" : "mr-auto bg-card text-card-foreground",
+      )}>
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <PhotoIcon className="h-5 w-5 shrink-0" />
+          <p className="italic">No se puede abrir: es un mensaje para ver una sola vez.</p>
+        </div>
+        <p className={cn("mt-2 text-right text-[10px]", outgoing ? "whatsapp-outgoing-meta" : "text-muted-foreground")}>
+          {item.time}
+        </p>
+      </div>
+    );
+  }
+
   if (item.type === "outgoing-file" || item.type === "incoming-file") {
     const isOutgoingFile = item.type === "outgoing-file";
     const isImageAttachment = isImageFile(item.fileType, item.text) && item.fileUrl;
+    const isStickerAttachment = Boolean(item.sticker && isImageAttachment);
     const isVideoAttachment = isVideoFile(item.fileType, item.text) && item.fileUrl;
     const isPdfAttachmentMessage = isPdfFile(item.fileType, item.text) && item.fileUrl;
     const fileBadge = getFileBadge(item.text, item.fileType);
@@ -1680,9 +1754,11 @@ function MessageBubble({
     const imageAlt = mediaCaption || item.text || "Imagen";
 
     return (
-      <div ref={mediaViewportRef} className={`relative w-fit max-w-[88%] rounded-md text-sm shadow-sm md:max-w-[55%] ${
+      <div ref={mediaViewportRef} className={`relative w-fit max-w-[88%] rounded-md text-sm md:max-w-[55%] ${
         isOutgoingFile ? "whatsapp-outgoing-bubble ml-auto" : "mr-auto bg-card text-card-foreground"
-      } ${isImageAttachment || isVideoAttachment || isPdfAttachmentMessage ? "p-1.5" : "px-3 py-3"}`}>
+      } ${isStickerAttachment ? "bg-transparent p-0 shadow-none" : "shadow-sm"} ${
+        isImageAttachment || isVideoAttachment || isPdfAttachmentMessage ? "p-1.5" : "px-3 py-3"
+      }`}>
         <MessageQuotePreview quote={item.replyTo} />
         {(isImageAttachment || isVideoAttachment || isPdfAttachmentMessage) && (
           <div className="absolute right-2 top-2 z-10 rounded-full bg-background/80 backdrop-blur">
@@ -1695,7 +1771,12 @@ function MessageBubble({
               type="button"
               onClick={() => visualMediaUrl && onOpenImagePreview({ alt: imageAlt, url: visualMediaUrl })}
               aria-label={imageAlt}
-              className="block h-64 w-[min(68vw,320px)] overflow-hidden rounded bg-muted"
+              className={cn(
+                "block overflow-hidden",
+                isStickerAttachment
+                  ? "h-40 w-40 bg-transparent sm:h-44 sm:w-44"
+                  : "h-64 w-[min(68vw,320px)] rounded bg-muted",
+              )}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
@@ -1703,7 +1784,7 @@ function MessageBubble({
                 alt={imageAlt}
                 loading="lazy"
                 decoding="async"
-                className="h-full w-full object-cover"
+                className={cn("h-full w-full", isStickerAttachment ? "object-contain" : "object-cover")}
               />
             </button>
             {mediaCaption ? (
@@ -2188,6 +2269,8 @@ export default function ChatPage() {
   const [replyTarget, setReplyTarget] = useState<ChatMessage | null>(null);
   const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
   const [deleteMessageTarget, setDeleteMessageTarget] = useState<ChatMessage | null>(null);
+  const [isDeleteConversationOpen, setIsDeleteConversationOpen] = useState(false);
+  const [isDeletingConversation, setIsDeletingConversation] = useState(false);
 
   const loadConversations = useCallback(async (options?: { append?: boolean; reset?: boolean; force?: boolean }) => {
     conversationAbortRef.current?.abort();
@@ -2736,7 +2819,7 @@ export default function ChatPage() {
     if (latest && aiDraftRunIdRef.current !== latest.idRun) {
       aiDraftRunIdRef.current = latest.idRun;
       setAiDraftText(latest.draft ?? "");
-      const requiresAdvisor = latest.requiresHuman || latest.outcome === "HUMAN_REQUIRED";
+      const requiresAdvisor = latest.outcome !== "FAILED" && (latest.requiresHuman || latest.outcome === "HUMAN_REQUIRED");
       if (requiresAdvisor) {
         aiPanelConversationRef.current = null;
         setIsAiPanelOpen(false);
@@ -3513,17 +3596,13 @@ export default function ChatPage() {
       setActiveFilter("all");
       if (action === "ACCEPT") {
         setActivePaymentReview(null);
-        if (aiAttendingActive) {
-          toast.error("Cambia el chat a atención humana para completar la venta");
-        } else {
-          setIsSidebarOpen(true);
-          window.setTimeout(() => {
-            window.dispatchEvent(new CustomEvent("crm-open-payment-sale", {
-              detail: { conversationId: Number(activeConversationId) },
-            }));
-          }, 0);
-          toast.success("Pago aceptado. Completa la venta en Venta Rapida");
-        }
+        setIsSidebarOpen(true);
+        window.setTimeout(() => {
+          window.dispatchEvent(new CustomEvent("crm-open-payment-sale", {
+            detail: { conversationId: Number(activeConversationId) },
+          }));
+        }, 0);
+        toast.success("Pago aceptado. Completa la venta en Venta Rápida");
       } else {
         setActivePaymentReview(null);
         window.dispatchEvent(new CustomEvent("crm-ai-sale-draft-event", {
@@ -3539,7 +3618,7 @@ export default function ChatPage() {
     } finally {
       setPaymentDecisionLoading(false);
     }
-  }, [activeConversationId, activePaymentReview, paymentDecisionLoading, aiAttendingActive]);
+  }, [activeConversationId, activePaymentReview, paymentDecisionLoading]);
 
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [activeMobileEmojiCategory, setActiveMobileEmojiCategory] =
@@ -4877,6 +4956,44 @@ export default function ChatPage() {
     }
   };
 
+  const confirmDeleteConversation = async () => {
+    const conversationId = activeConversationId;
+    if (!conversationId || isDeletingConversation) return;
+    setIsDeletingConversation(true);
+    try {
+      const response = await authFetch(`/api/crm/whatsapp/conversations/${conversationId}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) {
+        throw new Error(await readApiMessage(response, "No se pudo eliminar el chat"));
+      }
+      setConversations((current) => {
+        const next = current.filter((item) => item.id !== conversationId);
+        conversationsRef.current = next;
+        return next;
+      });
+      for (const entry of Object.values(conversationCacheRef.current)) {
+        entry.items = entry.items.filter((item) => item.id !== conversationId);
+        entry.totalElements = Math.max(0, entry.totalElements - 1);
+      }
+      delete allMessagesRef.current[conversationId];
+      delete messageCacheMetaRef.current[conversationId];
+      activeConversationIdRef.current = null;
+      setActiveConversationId(null);
+      setMessages([]);
+      setReplyTarget(null);
+      setIsSidebarOpen(false);
+      setIsActionMenuOpen(false);
+      setIsDeleteConversationOpen(false);
+      refreshConversationCountsRef.current();
+      toast.success("Chat eliminado correctamente");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo eliminar el chat");
+    } finally {
+      setIsDeletingConversation(false);
+    }
+  };
+
   const handleAttachFileClick = () => {
     if (!canOperateActiveConversation) return;
     fileInputRef.current?.click();
@@ -5503,6 +5620,17 @@ export default function ChatPage() {
                       <UserPlusIcon className="h-4 w-4" />
                       Transferir chat
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsActionMenuOpen(false);
+                        setIsDeleteConversationOpen(true);
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-red-600 transition-colors hover:bg-red-500/10 dark:text-red-400"
+                    >
+                      <TrashIcon className="h-4 w-4" />
+                      Eliminar chat
+                    </button>
                   </div>
                 )}
               </div>}
@@ -5694,7 +5822,7 @@ export default function ChatPage() {
           )}
           */}
           {isAiPanelOpen
-            && !Boolean(activeAiRun?.requiresHuman || activeAiRun?.outcome === "HUMAN_REQUIRED")
+            && !Boolean(activeAiRun?.outcome !== "FAILED" && (activeAiRun?.requiresHuman || activeAiRun?.outcome === "HUMAN_REQUIRED"))
             && (
             <AiCopilotCard
               run={activeAiRun}
@@ -6622,6 +6750,46 @@ export default function ChatPage() {
             onClick={() => void confirmDeleteMessage()}
           >
             {deletingMessageId ? "Eliminando..." : "Eliminar"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog
+      open={isDeleteConversationOpen}
+      onOpenChange={(open) => {
+        if (!isDeletingConversation) setIsDeleteConversationOpen(open);
+      }}
+    >
+      <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-sm">
+        <div className="flex flex-col items-center gap-3 px-6 pt-7 text-center">
+          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-red-500/10 text-red-600 dark:text-red-400">
+            <TrashIcon className="h-6 w-6" />
+          </span>
+          <DialogHeader className="text-center">
+            <DialogTitle>Eliminar chat</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Se eliminará esta conversación completa, incluidos sus mensajes, imágenes, audios y archivos. Esta acción no se puede deshacer.
+          </p>
+        </div>
+        <div className="mt-6 flex justify-end gap-2 border-t border-border bg-muted/30 px-6 py-4">
+          <Button
+            variant="outline"
+            size="sm"
+            className="rounded-full"
+            disabled={isDeletingConversation}
+            onClick={() => setIsDeleteConversationOpen(false)}
+          >
+            Cancelar
+          </Button>
+          <Button
+            size="sm"
+            className="rounded-full bg-red-600 text-white hover:bg-red-600/90"
+            disabled={isDeletingConversation}
+            onClick={() => void confirmDeleteConversation()}
+          >
+            {isDeletingConversation ? "Eliminando..." : "Eliminar chat"}
           </Button>
         </div>
       </DialogContent>

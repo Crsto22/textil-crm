@@ -103,7 +103,7 @@ export function AiCopilotCard({
   onClose,
 }: AiCopilotCardProps) {
   if (!processing && !run && !error) return null
-  if (!processing && (run?.requiresHuman || run?.outcome === "HUMAN_REQUIRED")) return null
+  if (!processing && run?.outcome !== "FAILED" && (run?.requiresHuman || run?.outcome === "HUMAN_REQUIRED")) return null
 
   const productEvidence = run?.evidence
     .filter((item) => item.tool === "buscar_productos")

@@ -83,6 +83,13 @@ function comprobanteLabel(item: ComprobanteResumen) {
   return `${item.tipoComprobante} ${item.serie}`
 }
 
+function defaultComprobanteId(comprobantes: ComprobanteResumen[]) {
+  return comprobantes.find((item) => item.tipoComprobante.trim().toUpperCase() === "NOTA DE VENTA")
+    ?.idComprobante
+    ?? comprobantes[0]?.idComprobante
+    ?? null
+}
+
 async function readError(response: Response, fallback: string) {
   const data = await response.json().catch(() => null)
   return data?.message || data?.detail || data?.error || fallback
@@ -104,6 +111,7 @@ export function ChatSidebar({ conversationId, clientPhone, contactName, aiAttend
   const [saving, setSaving] = useState(false)
   const [isMobileDrawer, setIsMobileDrawer] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
+  const selectedConversationRef = useRef(conversationId)
 
   const visibleContactPhone = normalizePeruvianMobile(context?.cliente?.telefono || context?.contactPhone || clientPhone)
   const visibleContactName = context?.cliente?.nombres || contactName || context?.contactName || visibleContactPhone || "Cliente sin registrar"
@@ -133,7 +141,11 @@ export function ChatSidebar({ conversationId, clientPhone, contactName, aiAttend
       if (controller.signal.aborted) return
       setContext(data)
       setSelectedSucursalId(data.sucursales[0]?.idSucursal ?? null)
-      setSelectedComprobanteId((current) => current ?? data.comprobantes[0]?.idComprobante ?? null)
+      const conversationChanged = selectedConversationRef.current !== conversationId
+      selectedConversationRef.current = conversationId
+      setSelectedComprobanteId((current) => conversationChanged
+        ? defaultComprobanteId(data.comprobantes)
+        : current ?? defaultComprobanteId(data.comprobantes))
       setRegisterForm({
         ...emptyRegisterForm,
         nombres: data.contactName || contactName || "",
@@ -503,7 +515,7 @@ export function ChatSidebar({ conversationId, clientPhone, contactName, aiAttend
               contactPhone={clientPhone}
               onCompleted={handleSaleCompleted}
               onDraftChange={setSaleHasDraft}
-              onPaymentPrepared={() => setSelectedComprobanteId(null)}
+              onPaymentPrepared={() => setSelectedComprobanteId(defaultComprobanteId(context.comprobantes))}
               onCustomerChanged={() => {
                 void loadContext()
                 onClientUpdated?.()

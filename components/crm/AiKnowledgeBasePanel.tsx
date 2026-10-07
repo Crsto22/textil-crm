@@ -91,6 +91,7 @@ export function AiKnowledgeBasePanel({ enabled }: { enabled: boolean }) {
   const [form, setForm] = useState<ArticleForm>(EMPTY_FORM)
   const [testQuestion, setTestQuestion] = useState("")
   const [testing, setTesting] = useState(false)
+  const [deletingId, setDeletingId] = useState<number | null>(null)
   const [testAnswer, setTestAnswer] = useState("")
   const [testSources, setTestSources] = useState<KnowledgeSource[]>([])
 
@@ -176,13 +177,23 @@ export function AiKnowledgeBasePanel({ enabled }: { enabled: boolean }) {
 
   const remove = async (article: KnowledgeArticle) => {
     if (!window.confirm(`Eliminar "${article.title}" de la base de conocimiento?`)) return
-    const response = await authFetch(`/api/crm/whatsapp/connection/ai-knowledge/${article.id}`, { method: "DELETE" })
-    if (!response.ok) {
-      toast.error(await responseMessage(response, "No se pudo eliminar el articulo"))
-      return
+    setDeletingId(article.id)
+    try {
+      const response = await authFetch(`/api/crm/whatsapp/connection/ai-knowledge/${article.id}`, { method: "DELETE" })
+      if (!response.ok) throw new Error(await responseMessage(response, "No se pudo eliminar el articulo"))
+      setArticles((current) => current.filter((item) => item.id !== article.id))
+      if (editingId === article.id) {
+        setEditingId(null)
+        setShowForm(false)
+        setForm(EMPTY_FORM)
+      }
+      toast.success("Articulo eliminado")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo eliminar el articulo")
+      await load()
+    } finally {
+      setDeletingId(null)
     }
-    toast.success("Articulo eliminado")
-    await load()
   }
 
   const reindex = async (article: KnowledgeArticle) => {
@@ -272,7 +283,7 @@ export function AiKnowledgeBasePanel({ enabled }: { enabled: boolean }) {
                 <div className="flex items-start gap-2">
                   <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h5 className="truncate text-xs font-semibold">{article.title}</h5><StatusBadge status={article.status} /></div><p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">{article.content}</p><p className="mt-1 text-[10px] text-muted-foreground">{CATEGORIES.find(([value]) => value === article.category)?.[1]}{article.keywords ? ` · ${article.keywords}` : ""}</p>{article.status === "ERROR" && article.lastError && <p className="mt-1 text-[10px] text-red-600">{article.lastError}</p>}</div>
                   <button type="button" title="Editar" onClick={() => startEdit(article)} className="rounded-md p-1.5 text-muted-foreground hover:bg-muted"><PencilSquareIcon className="h-4 w-4" /></button>
-                  <button type="button" title="Eliminar" onClick={() => void remove(article)} className="rounded-md p-1.5 text-red-600 hover:bg-red-50"><TrashIcon className="h-4 w-4" /></button>
+                  <button type="button" title="Eliminar" disabled={deletingId === article.id} onClick={() => void remove(article)} className="rounded-md p-1.5 text-red-600 hover:bg-red-50 disabled:cursor-wait disabled:opacity-40">{deletingId === article.id ? <ArrowPathIcon className="h-4 w-4 animate-spin" /> : <TrashIcon className="h-4 w-4" />}</button>
                 </div>
                 {article.status === "ERROR" && <Button type="button" size="sm" variant="outline" onClick={() => void reindex(article)} className="mt-2 h-7 rounded-md text-[10px]"><ArrowPathIcon className="h-3.5 w-3.5" />Reintentar indexacion</Button>}
               </article>

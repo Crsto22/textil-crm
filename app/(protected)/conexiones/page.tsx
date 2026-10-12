@@ -194,13 +194,16 @@ const KNOWLEDGE_CATEGORIES: ReadonlyArray<{ value: KnowledgeCategory; label: str
 
 const GEMINI_MODELS = [
   ["gemini-3.8-flash", "Gemini 3.8 Flash - Recomendado"],
-  ["gemini-3.7-flash", "Gemini 3.7 Flash"],
-  ["gemini-3.6-flash", "Gemini 3.6 Flash"],
+  ["gemini-3.6-flash", "Gemini 3.6 Flash - Equilibrado"],
   ["gemini-3.5-flash-lite", "Gemini 3.5 Flash-Lite - Económico"],
-  ["gemini-3.1-flash-lite", "Gemini 3.1 Flash-Lite"],
-  ["gemini-2.5-flash", "Gemini 2.5 Flash - Compatibilidad"],
-  ["gemini-2.5-flash-lite", "Gemini 2.5 Flash-Lite - Compatibilidad"],
-  ["gemini-2.5-pro", "Gemini 2.5 Pro - Compatibilidad"],
+  ["gemini-3.7-flash", "Gemini 3.7 Flash - Heredado, redirige a 3.8"],
+  ["gemini-3.5-flash", "Gemini 3.5 Flash - Heredado, redirige a 3.6"],
+  ["gemini-3.1-flash-lite", "Gemini 3.1 Flash-Lite - Heredado"],
+  ["gemini-3.1-pro-preview", "Gemini 3.1 Pro - Preview"],
+  ["gemini-3-flash-preview", "Gemini 3 Flash - Preview"],
+  ["gemini-2.5-flash", "Gemini 2.5 Flash - Acceso restringido"],
+  ["gemini-2.5-flash-lite", "Gemini 2.5 Flash-Lite - Acceso restringido"],
+  ["gemini-2.5-pro", "Gemini 2.5 Pro - Acceso restringido"],
 ] as const
 
 const statusMap: Record<WhatsappStatusValue, { label: string; description: string; className: string }> = {
@@ -881,7 +884,7 @@ export default function ConexionesPage() {
             <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${aiCredentials?.configured ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{aiCredentials?.configured ? "Configurada" : "Pendiente"}</span>
           </div>
           <label className="block space-y-1 text-xs font-medium">{aiCredentials?.source === "DATABASE" ? "Nueva API key" : "API key"}<input type="password" value={apiKeyInput} autoComplete="new-password" onChange={(event) => setApiKeyInput(event.target.value)} placeholder={aiCredentials?.configured ? aiCredentials.maskedKey : "AIza..."} className="h-10 w-full rounded-lg border border-input bg-background px-3 text-xs outline-none focus:border-primary" /></label>
-          <label className="block space-y-1 text-xs font-medium">Modelo<select value={modelInput} onChange={(event) => setModelInput(event.target.value)} className="h-10 w-full rounded-lg border border-input bg-background px-3 text-xs">{modelInput && !GEMINI_MODELS.some(([value]) => value === modelInput) && <option value={modelInput}>{modelInput} - Configurado</option>}{GEMINI_MODELS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <label className="block space-y-1 text-xs font-medium">Modelo<select value={modelInput} onChange={(event) => setModelInput(event.target.value)} className="h-10 w-full rounded-lg border border-input bg-background px-3 text-xs">{modelInput && !GEMINI_MODELS.some(([value]) => value === modelInput) && <option value={modelInput}>{modelInput} - Configurado</option>}{GEMINI_MODELS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><span className="block text-[11px] font-normal text-muted-foreground">Solo se muestran modelos conversacionales compatibles con respuestas estructuradas y herramientas.</span></label>
           {aiCredentials && !aiCredentials.masterKeyConfigured && <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">Configura AI_SECRETS_MASTER_KEY en el servidor para guardar claves cifradas.</p>}
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             <Button type="button" size="sm" onClick={() => void handleSaveCredentials()} disabled={isSavingCredentials || !status?.connectionConfigured || (!apiKeyInput.trim() && modelInput === aiCredentials?.model) || (Boolean(apiKeyInput.trim()) && !aiCredentials?.masterKeyConfigured)}><KeyIcon className="h-4 w-4" />{isSavingCredentials ? "Guardando..." : "Guardar"}</Button>

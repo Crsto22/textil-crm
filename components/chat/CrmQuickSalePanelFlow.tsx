@@ -15,7 +15,6 @@ import {
   PhotoIcon,
   PlusIcon,
   ShoppingBagIcon,
-  SparklesIcon,
   TagIcon,
   TrashIcon,
   XMarkIcon,
@@ -222,70 +221,6 @@ interface PaymentRequestSummary {
   detectedProvider: string | null
 }
 
-interface AiSaleDraftItem {
-  productId: number
-  variantId: number
-  productName: string
-  sku: string | null
-  color: string | null
-  size: string | null
-  quantity: number
-  regularUnitPrice: number | null
-  unitPrice: number
-  stock: number
-  imageUrl: string | null
-  preventa: boolean
-  fechaEnvioPreventa: string | null
-}
-
-interface AiSaleDraftPromotion {
-  promotionId: number
-  name: string
-  rule: string
-  regularPrice: number
-  comboPrice: number
-  discount: number
-}
-
-interface AiSaleDraft {
-  id: number
-  conversationId: number
-  status: "BUILDING" | "AWAITING_CUSTOMER" | "AWAITING_CUSTOMER_DATA" | "READY_FOR_REVIEW" | "IMPORTED" | "PAYMENT_PENDING" | "COMPLETED" | "CANCELLED" | "EXPIRED"
-  version: number
-  customerConfirmed: boolean
-  customerConfirmedAt: string | null
-  paymentMethodId: number | null
-  paymentMethod: string | null
-  pendingCustomerName: string | null
-  pendingCustomerPhone: string | null
-  customerNameCurrent: string | null
-  customerNameSuggested: string | null
-  customerNameSuggestionStatus: "PENDING" | "APPLIED" | "DISMISSED" | null
-  pendingPromotionId: number | null
-  subtotal: number
-  promotionDiscount: number
-  total: number
-  expiresAt: string
-  warnings: string[]
-  promotions: AiSaleDraftPromotion[]
-  items: AiSaleDraftItem[]
-}
-
-function normalizeAiSaleDraft(value: unknown): AiSaleDraft | null {
-  if (!value || typeof value !== "object") return null
-  const candidate = value as Partial<AiSaleDraft>
-  if (typeof candidate.id !== "number" || typeof candidate.status !== "string") return null
-  return {
-    ...candidate,
-    subtotal: Number(candidate.subtotal) || 0,
-    promotionDiscount: Number(candidate.promotionDiscount) || 0,
-    total: Number(candidate.total) || 0,
-    warnings: Array.isArray(candidate.warnings) ? candidate.warnings : [],
-    promotions: Array.isArray(candidate.promotions) ? candidate.promotions : [],
-    items: Array.isArray(candidate.items) ? candidate.items : [],
-  } as AiSaleDraft
-}
-
 interface CartItem {
   idProductoVariante: number
   nombre: string
@@ -300,22 +235,6 @@ interface CartItem {
   prices: { type: PriceType; label: string; value: number }[]
 }
 
-function draftItemsToCart(items: AiSaleDraftItem[]): CartItem[] {
-  return items.map((item) => ({
-    idProductoVariante: item.variantId,
-    nombre: item.productName,
-    sku: item.sku,
-    color: item.color || "",
-    talla: item.size || "",
-    imageUrl: item.imageUrl,
-    stock: item.stock,
-    cantidad: item.quantity,
-    priceType: "normal",
-    precio: Number(item.unitPrice),
-    prices: [{ type: "normal", label: "Precio confirmado", value: Number(item.unitPrice) }],
-  }))
-}
-
 interface CrmQuickSalePanelFlowProps {
   conversationId: string
   context: QuickSaleContext
@@ -325,22 +244,12 @@ interface CrmQuickSalePanelFlowProps {
   onCompleted: (context: QuickSaleContext) => void
   onDraftChange?: (hasDraft: boolean) => void
   onPaymentPrepared?: () => void
-  onCustomerChanged?: () => void
 }
 
 const IGV = 18
 
 function money(value: number) {
   return `S/${value.toFixed(2)}`
-}
-
-function preorderShippingDate(value: string) {
-  return new Intl.DateTimeFormat("es-PE", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(new Date(`${value}T00:00:00Z`))
 }
 
 function paymentRequestLabel(status: string) {
@@ -472,8 +381,6 @@ export function CrmQuickSalePanelFlow({
   contactPhone,
   onCompleted,
   onDraftChange,
-  onPaymentPrepared,
-  onCustomerChanged,
 }: CrmQuickSalePanelFlowProps) {
   const [step, setStep] = useState<SaleStep>("cart")
   const [productDrawerOpen, setProductDrawerOpen] = useState(false)
@@ -485,9 +392,6 @@ export function CrmQuickSalePanelFlow({
   const [selectedProduct, setSelectedProduct] = useState<ProductoResumen | null>(null)
   const [options, setOptions] = useState<SaleOptionsResponse | null>(null)
   const [activePaymentRequest, setActivePaymentRequest] = useState<PaymentRequestSummary | null>(null)
-  const [aiSaleDraft, setAiSaleDraft] = useState<AiSaleDraft | null>(null)
-  const [aiDraftLoading, setAiDraftLoading] = useState(false)
-  const [aiDraftDirty, setAiDraftDirty] = useState(false)
   const [cart, setCart] = useState<CartItem[]>([])
   const [discountMode, setDiscountMode] = useState<DiscountMode>("none")
   const [discountValue, setDiscountValue] = useState("")
@@ -500,14 +404,13 @@ export function CrmQuickSalePanelFlow({
   const [backupPhoneModalOpen, setBackupPhoneModalOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const previousSucursalRef = useRef<number | null>(selectedSucursalId)
-  const restoredPaymentRequestRef = useRef<number | null>(null)
 
   const selectedComprobante = context.comprobantes.find((item) => item.idComprobante === selectedComprobanteId) ?? null
   const selectedMethod = options?.metodosPago.find((item) => item.idMetodoPago === selectedMethodId) ?? null
   const normalizedPhone = normalizePeruvianMobile(context.cliente?.telefono || context.contactPhone || contactPhone)
   const hasDraft = cart.length > 0
   const reservedPaymentReady = activePaymentRequest?.status === "READY_FOR_SALE"
-  const cartLocked = reservedPaymentReady || aiSaleDraft?.status === "IMPORTED"
+  const cartLocked = reservedPaymentReady
 
   useEffect(() => {
     onDraftChange?.(hasDraft)
@@ -616,34 +519,6 @@ export function CrmQuickSalePanelFlow({
     }
   }, [conversationId, loadActivePaymentRequest])
 
-  const loadAiSaleDraft = useCallback(async () => {
-    try {
-      const response = await authFetch(`/api/crm/whatsapp/conversations/${conversationId}/ai/sale-draft`, { cache: "no-store" })
-      if (!response.ok) throw new Error(await readError(response, "No se pudo cargar el pedido de IA Kiments"))
-      if (response.status === 204) {
-        setAiSaleDraft(null)
-        return
-      }
-      setAiSaleDraft(normalizeAiSaleDraft(await response.json()))
-    } catch {
-      setAiSaleDraft(null)
-    }
-  }, [conversationId])
-
-  useEffect(() => {
-    const timeoutId = window.setTimeout(() => void loadAiSaleDraft(), 0)
-    return () => window.clearTimeout(timeoutId)
-  }, [loadAiSaleDraft])
-
-  useEffect(() => {
-    const refresh = (event: Event) => {
-      const detail = (event as CustomEvent<{ conversationId?: number }>).detail
-      if (String(detail?.conversationId ?? "") === conversationId) void loadAiSaleDraft()
-    }
-    window.addEventListener("crm-ai-sale-draft-event", refresh)
-    return () => window.removeEventListener("crm-ai-sale-draft-event", refresh)
-  }, [conversationId, loadAiSaleDraft])
-
   const subtotal = cart.reduce((sum, item) => sum + item.precio * item.cantidad, 0)
   const rawDiscount = Number(discountValue.replace(",", ".")) || 0
   const discountAmount =
@@ -665,7 +540,6 @@ export function CrmQuickSalePanelFlow({
       toast.error("La variante no tiene stock disponible")
       return
     }
-    if (aiSaleDraft?.status === "IMPORTED") setAiDraftDirty(true)
     setCart((current) => {
       const existing = current.find((cartItem) => cartItem.idProductoVariante === item.idProductoVariante)
       if (existing) {
@@ -695,7 +569,6 @@ export function CrmQuickSalePanelFlow({
       toast.error("El pedido reservado no se puede modificar")
       return
     }
-    if (aiSaleDraft?.status === "IMPORTED") setAiDraftDirty(true)
     setCart((current) =>
       current.map((item) => {
         if (item.idProductoVariante !== idProductoVariante) return item
@@ -718,8 +591,6 @@ export function CrmQuickSalePanelFlow({
       descuentoTotal: discountAmount,
       tipoDescuento: discountMode === "percent" ? "PORCENTAJE" : discountMode === "amount" ? "MONTO" : null,
       telefonoRespaldo: normalizePeruvianMobile(backupPhone),
-      aiSaleDraftId: aiSaleDraft?.status === "IMPORTED" ? aiSaleDraft.id : null,
-      aiSaleDraftVersion: aiSaleDraft?.status === "IMPORTED" ? aiSaleDraft.version : null,
       detalles: cart.map((item) => ({
         idProductoVariante: item.idProductoVariante,
         descripcion: `${item.nombre} ${item.color} ${item.talla}`.trim(),
@@ -740,126 +611,7 @@ export function CrmQuickSalePanelFlow({
     }
   }
 
-  const importAiDraft = async () => {
-    if (!aiSaleDraft) return
-    if (cart.length > 0 && !window.confirm("Reemplazar el carrito actual por el pedido confirmado por el cliente?")) return
-    setAiDraftLoading(true)
-    try {
-      const response = await authFetch(`/api/crm/whatsapp/conversations/${conversationId}/ai/sale-draft/revalidate`, {
-        method: "POST",
-        body: JSON.stringify({ markImported: true }),
-      })
-      if (!response.ok) throw new Error(await readError(response, "No se pudo cargar el pedido de IA Kiments"))
-      const draft = normalizeAiSaleDraft(await response.json())
-      if (!draft) throw new Error("El pedido de IA Kiments recibido no es valido")
-      setAiSaleDraft(draft)
-      setAiDraftDirty(false)
-      setCart(draftItemsToCart(draft.items))
-      setSelectedMethodId(null)
-      setDiscountMode(draft.promotionDiscount > 0 ? "amount" : "none")
-      setDiscountValue(draft.promotionDiscount > 0 ? String(draft.promotionDiscount) : "")
-      setStep("cart")
-      toast.success("Pedido de IA Kiments cargado en Venta Rapida")
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "No se pudo cargar el pedido de IA Kiments")
-    } finally {
-      setAiDraftLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    if (!activePaymentRequest || activePaymentRequest.status !== "READY_FOR_SALE"
-      || !activePaymentRequest.advisorAccepted || !aiSaleDraft) return
-    if (restoredPaymentRequestRef.current === activePaymentRequest.idPaymentRequest) return
-    const timeoutId = window.setTimeout(() => {
-      restoredPaymentRequestRef.current = activePaymentRequest.idPaymentRequest
-      setCart(draftItemsToCart(aiSaleDraft.items))
-      setAiDraftDirty(false)
-      setSelectedMethodId(null)
-      setSelectedAccountId(null)
-      onPaymentPrepared?.()
-      setDiscountMode(aiSaleDraft.promotionDiscount > 0 ? "amount" : "none")
-      setDiscountValue(aiSaleDraft.promotionDiscount > 0 ? String(aiSaleDraft.promotionDiscount) : "")
-      setOperationCode(activePaymentRequest.operationCode || "")
-      if (activePaymentRequest.operationAt) {
-        setPaymentDate(activePaymentRequest.operationAt.slice(0, 10))
-        setPaymentTime(activePaymentRequest.operationAt.slice(11, 16))
-      }
-      setStep("cart")
-      toast.success("Comprobante registrado y pedido cargado en Venta Rapida")
-    }, 0)
-    return () => window.clearTimeout(timeoutId)
-  }, [activePaymentRequest, aiSaleDraft, onPaymentPrepared])
-
-  useEffect(() => {
-    restoredPaymentRequestRef.current = null
-  }, [conversationId])
-
-  const requestAiConfirmation = async () => {
-    setAiDraftLoading(true)
-    try {
-      const response = await authFetch(`/api/crm/whatsapp/conversations/${conversationId}/ai/sale-draft/request-confirmation`, {
-        method: "POST",
-        body: JSON.stringify({
-          items: cart.length > 0 ? cart.map((item) => ({ variantId: item.idProductoVariante, quantity: item.cantidad })) : null,
-          paymentMethodId: selectedMethodId,
-        }),
-      })
-      if (!response.ok) throw new Error(await readError(response, "No se pudo solicitar confirmacion"))
-      const draft = normalizeAiSaleDraft(await response.json())
-      if (!draft) throw new Error("El pedido de IA Kiments recibido no es valido")
-      setAiSaleDraft(draft)
-      setAiDraftDirty(false)
-      toast.success("Resumen enviado al cliente")
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "No se pudo solicitar confirmacion")
-    } finally {
-      setAiDraftLoading(false)
-    }
-  }
-
-  const discardAiDraft = async () => {
-    if (!window.confirm("Descartar el pedido preparado por IA Kiments?")) return
-    setAiDraftLoading(true)
-    try {
-      const response = await authFetch(`/api/crm/whatsapp/conversations/${conversationId}/ai/sale-draft`, { method: "DELETE" })
-      if (!response.ok) throw new Error(await readError(response, "No se pudo descartar el pedido"))
-      setAiSaleDraft(null)
-      setAiDraftDirty(false)
-      toast.success("Pedido de IA Kiments descartado")
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "No se pudo descartar el pedido")
-    } finally {
-      setAiDraftLoading(false)
-    }
-  }
-
-  const decideCustomerNameSuggestion = async (action: "APPLY" | "DISMISS") => {
-    if (!aiSaleDraft || aiSaleDraft.customerNameSuggestionStatus !== "PENDING") return
-    setAiDraftLoading(true)
-    try {
-      const response = await authFetch(
-        `/api/crm/whatsapp/conversations/${conversationId}/ai/sale-draft/customer-name-suggestion`,
-        { method: "POST", body: JSON.stringify({ action }) },
-      )
-      if (!response.ok) throw new Error(await readError(response, "No se pudo guardar la decision"))
-      const draft = normalizeAiSaleDraft(await response.json())
-      if (!draft) throw new Error("El pedido de IA Kiments recibido no es valido")
-      setAiSaleDraft(draft)
-      onCustomerChanged?.()
-      toast.success(action === "APPLY" ? "Nombre del cliente actualizado" : "Se mantuvo el nombre actual")
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "No se pudo guardar la decision")
-    } finally {
-      setAiDraftLoading(false)
-    }
-  }
-
   const submitSale = async () => {
-    if (aiSaleDraft?.status === "IMPORTED" && aiDraftDirty) {
-      toast.error("Solicita una nueva confirmacion del cliente antes de emitir")
-      return false
-    }
     if (!selectedSucursalId || !selectedComprobanteId) {
       toast.error("Selecciona sucursal y comprobante")
       return false
@@ -905,8 +657,6 @@ export function CrmQuickSalePanelFlow({
       const data = (await response.json()) as { context: QuickSaleContext; venta?: { serie?: string; correlativo?: number } }
       setCart([])
       setActivePaymentRequest(null)
-      setAiSaleDraft(null)
-      setAiDraftDirty(false)
       setDiscountMode("none")
       setDiscountValue("")
       setStep("cart")
@@ -929,21 +679,10 @@ export function CrmQuickSalePanelFlow({
   return (
     <section className="contents">
       <div className="flex min-h-0 flex-1 flex-col">
-        {aiSaleDraft && aiSaleDraft.status !== "PAYMENT_PENDING" ? (
-          <AiSaleDraftCard
-            draft={aiSaleDraft}
-            dirty={aiDraftDirty}
-            loading={aiDraftLoading}
-            onImport={() => void importAiDraft()}
-            onRequestConfirmation={() => void requestAiConfirmation()}
-            onDiscard={() => void discardAiDraft()}
-            onCustomerNameDecision={(action) => void decideCustomerNameSuggestion(action)}
-          />
-        ) : null}
         {activePaymentRequest && Number.isFinite(activePaymentRequest.expectedAmount) && activePaymentRequest.expectedAmount > 0 ? (
           <div className="mb-2 rounded-xl border border-blue-200 px-3 py-2 text-[11px] text-slate-700 dark:border-blue-500/30 dark:text-slate-200">
-            <p className="font-bold">Pago asistido por IA Kiments</p>
-            <p>{paymentRequestLabel(activePaymentRequest.status)} · {money(Number(activePaymentRequest.expectedAmount))}</p>
+            <p className="font-bold">Pago pendiente de validación</p>
+            <p>{paymentRequestLabel(activePaymentRequest.status)} Â· {money(Number(activePaymentRequest.expectedAmount))}</p>
             {activePaymentRequest.detectedProvider ? <p className="text-slate-400">Medio detectado: {activePaymentRequest.detectedProvider}</p> : null}
           </div>
         ) : null}
@@ -955,7 +694,6 @@ export function CrmQuickSalePanelFlow({
             selectedMethodId={selectedMethodId}
             setSelectedMethodId={(value) => {
               setSelectedMethodId(value)
-              if (aiSaleDraft?.status === "IMPORTED" && value !== aiSaleDraft.paymentMethodId) setAiDraftDirty(true)
               const method = options?.metodosPago.find((item) => item.idMetodoPago === value)
               setSelectedAccountId(method?.cuentas?.[0]?.idMetodoPagoCuenta ?? null)
             }}
@@ -999,7 +737,7 @@ export function CrmQuickSalePanelFlow({
               else setProductDrawerOpen(true)
             }}
             onContinue={() => {
-              if (aiSaleDraft?.status !== "IMPORTED") setSelectedMethodId(null)
+              setSelectedMethodId(null)
               if (!reservedPaymentReady) {
                 setOperationCode("")
                 setPaymentDate(today())
@@ -1012,7 +750,6 @@ export function CrmQuickSalePanelFlow({
                 toast.error("El pedido reservado no se puede modificar")
                 return
               }
-              if (aiSaleDraft?.status === "IMPORTED") setAiDraftDirty(true)
               setCart([])
             }}
             onUpdateQty={updateQty}
@@ -1021,7 +758,6 @@ export function CrmQuickSalePanelFlow({
                 toast.error("El pedido reservado no se puede modificar")
                 return
               }
-              if (aiSaleDraft?.status === "IMPORTED") setAiDraftDirty(true)
               setCart((current) => current.filter((item) => item.idProductoVariante !== id))
             }}
             onPriceChange={(id, type) => {
@@ -1029,7 +765,6 @@ export function CrmQuickSalePanelFlow({
                 toast.error("El pedido reservado no se puede modificar")
                 return
               }
-              if (aiSaleDraft?.status === "IMPORTED") setAiDraftDirty(true)
               setCart((current) =>
                 current.map((item) => {
                   if (item.idProductoVariante !== id) return item
@@ -1043,7 +778,6 @@ export function CrmQuickSalePanelFlow({
                 toast.error("El pedido reservado no se puede modificar")
                 return
               }
-              if (aiSaleDraft?.status === "IMPORTED") setAiDraftDirty(true)
               setCart((current) =>
                 current.map((item) =>
                   item.idProductoVariante === id
@@ -1132,113 +866,6 @@ export function CrmQuickSalePanelFlow({
         </DialogContent>
       </Dialog>
     </section>
-  )
-}
-
-function AiSaleDraftCard({
-  draft,
-  dirty,
-  loading,
-  onImport,
-  onRequestConfirmation,
-  onDiscard,
-  onCustomerNameDecision,
-}: {
-  draft: AiSaleDraft
-  dirty: boolean
-  loading: boolean
-  onImport: () => void
-  onRequestConfirmation: () => void
-  onDiscard: () => void
-  onCustomerNameDecision: (action: "APPLY" | "DISMISS") => void
-}) {
-  const ready = (draft.status === "READY_FOR_REVIEW" || draft.status === "IMPORTED") && !dirty
-  const waitingCustomerData = draft.status === "AWAITING_CUSTOMER_DATA"
-  const items = Array.isArray(draft.items) ? draft.items : []
-  return (
-    <div className="mb-2 border-y border-blue-200 bg-blue-50/70 px-3 py-2.5 dark:border-blue-500/25 dark:bg-blue-500/10">
-      <div className="flex items-start gap-2">
-        <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white">
-          <SparklesIcon className="h-4 w-4" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center justify-between gap-2">
-            <p className="truncate text-xs font-bold text-slate-900 dark:text-slate-100">Pedido preparado por IA Kiments</p>
-            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-bold ${ready ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300" : "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"}`}>
-              {dirty ? "Cambios pendientes" : waitingCustomerData ? "Datos del cliente" : ready ? "Confirmado" : "Por confirmar"}
-            </span>
-          </div>
-          <div className="mt-1 space-y-0.5 text-[10px] text-slate-600 dark:text-slate-300">
-            {items.slice(0, 3).map((item) => (
-              <div key={item.variantId}>
-                <p className="truncate">{item.quantity} x {item.productName} {item.color || ""} {item.size ? `T. ${item.size}` : ""}</p>
-                {item.preventa && item.fechaEnvioPreventa ? (
-                  <p className="truncate font-semibold text-blue-700 dark:text-blue-300">
-                    Preventa · envíos desde {preorderShippingDate(item.fechaEnvioPreventa)}
-                  </p>
-                ) : null}
-              </div>
-            ))}
-            {items.length > 3 ? <p>+{items.length - 3} producto(s)</p> : null}
-          </div>
-          <div className="mt-1.5 flex items-center justify-between gap-2">
-            <span className="text-sm font-extrabold text-slate-900 dark:text-white">{money(Number(draft.total))}</span>
-            <span className="truncate text-[10px] font-semibold text-slate-500">{draft.paymentMethod || "Pago pendiente"}</span>
-          </div>
-          {draft.promotions.map((promotion) => (
-            <div key={promotion.promotionId} className="mt-1 rounded-md bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">
-              Combo {promotion.name}: -{money(Number(promotion.discount))}
-            </div>
-          ))}
-          {draft.customerNameSuggestionStatus === "PENDING"
-            && draft.customerNameCurrent
-            && draft.customerNameSuggested ? (
-            <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-[10px] text-amber-900 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-200">
-              <p>
-                El cliente indico: <strong>{draft.customerNameSuggested}</strong>. En CRM figura:{" "}
-                <strong>{draft.customerNameCurrent}</strong>.
-              </p>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                <Button
-                  type="button"
-                  size="sm"
-                  className="h-7 rounded-lg px-2 text-[10px] font-bold"
-                  disabled={loading}
-                  onClick={() => onCustomerNameDecision("APPLY")}
-                >
-                  Actualizar nombre
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="h-7 rounded-lg px-2 text-[10px] font-bold"
-                  disabled={loading}
-                  onClick={() => onCustomerNameDecision("DISMISS")}
-                >
-                  Mantener actual
-                </Button>
-              </div>
-            </div>
-          ) : null}
-          {draft.warnings?.length ? <p className="mt-1 text-[10px] font-semibold text-amber-700 dark:text-amber-300">{draft.warnings.join(". ")}</p> : null}
-          <div className="mt-2 grid grid-cols-[1fr_auto] gap-1.5">
-            {ready ? (
-              <Button type="button" className="h-8 rounded-xl text-[10px] font-bold" disabled={loading || draft.status === "IMPORTED"} onClick={onImport}>
-                {draft.status === "IMPORTED" ? "Cargado" : "Cargar en Venta Rapida"}
-              </Button>
-            ) : (
-              <Button type="button" className="h-8 rounded-xl text-[10px] font-bold" disabled={loading || items.length === 0 || waitingCustomerData} onClick={onRequestConfirmation}>
-                {waitingCustomerData ? "Esperando datos del cliente" : "Solicitar confirmacion"}
-              </Button>
-            )}
-            <Button type="button" variant="outline" className="h-8 rounded-xl px-2 text-[10px]" disabled={loading} onClick={onDiscard}>
-              Descartar
-            </Button>
-          </div>
-        </div>
-      </div>
-    </div>
   )
 }
 
@@ -1371,7 +998,7 @@ function CartStep({
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-xs font-bold text-slate-900 dark:text-slate-100">{item.nombre}</p>
-                    <p className="truncate text-[10px] text-slate-500">{item.color} · {item.talla}</p>
+                    <p className="truncate text-[10px] text-slate-500">{item.color} Â· {item.talla}</p>
                     {editingPriceId === item.idProductoVariante ? (
                       <div className="mt-1 flex items-center gap-1">
                         <span className="text-[10px] text-slate-400">S/</span>

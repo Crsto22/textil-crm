@@ -25,6 +25,7 @@ import { CrmClientForm } from "@/components/crm/CrmClientForm"
 import { authFetch } from "@/lib/auth/auth-fetch"
 import { isValidPeruvianMobile, normalizePeruvianMobile } from "@/lib/crm/phone"
 import { CrmQuickSalePanelFlow } from "@/components/chat/CrmQuickSalePanelFlow"
+import { AgentConversationPanel } from "@/components/chat/AgentConversationPanel"
 
 type TipoDocumento = "SIN_DOC" | "DNI" | "RUC" | "CE"
 
@@ -64,10 +65,10 @@ interface ChatSidebarProps {
   conversationId: string
   clientPhone: string
   contactName?: string | null
-  aiAttending?: boolean
   onClose: () => void
   onSaleCompleted?: () => void
   onClientUpdated?: () => void
+  isAdmin?: boolean
 }
 
 const emptyRegisterForm = {
@@ -95,8 +96,9 @@ async function readError(response: Response, fallback: string) {
   return data?.message || data?.detail || data?.error || fallback
 }
 
-export function ChatSidebar({ conversationId, clientPhone, contactName, aiAttending = false, onClose, onSaleCompleted, onClientUpdated }: ChatSidebarProps) {
+export function ChatSidebar({ conversationId, clientPhone, contactName, onClose, onSaleCompleted, onClientUpdated, isAdmin = false }: ChatSidebarProps) {
   const router = useRouter()
+  const [activePanel, setActivePanel] = useState<"agent" | "sale">("agent")
   const [context, setContext] = useState<QuickSaleContext | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -353,15 +355,23 @@ export function ChatSidebar({ conversationId, clientPhone, contactName, aiAttend
   return (
     <div className="flex h-full flex-col border-l border-border bg-background">
       <div className="flex shrink-0 items-center gap-1 border-b border-border bg-muted/30 px-1.5 py-1">
-        <div className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-background px-3 py-1.5 text-[11px] font-semibold text-foreground shadow-sm">
+        <button type="button" onClick={() => setActivePanel("agent")} className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-semibold transition ${activePanel === "agent" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+          <SparklesIcon className="h-3.5 w-3.5" />
+          Agente
+        </button>
+        <button type="button" onClick={() => setActivePanel("sale")} className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-semibold transition ${activePanel === "sale" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
           <ShoppingBagIcon className="h-3.5 w-3.5" />
-          Venta Rapida
-        </div>
+          Venta rápida
+        </button>
         <button onClick={onClose} className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-background hover:text-foreground" aria-label="Cerrar panel">
           <XMarkIcon className="h-3.5 w-3.5" />
         </button>
       </div>
 
+      {activePanel === "agent" ? (
+        <AgentConversationPanel key={conversationId} conversationId={conversationId} isAdmin={isAdmin} />
+      ) : (
+        <>
       <div className="shrink-0 border-b border-border px-3 py-2.5">
         <div className="flex items-center gap-2 rounded-xl border border-border bg-background px-2.5 py-2 shadow-sm">
           <UserIcon className="h-4 w-4 shrink-0 text-emerald-500" />
@@ -373,10 +383,9 @@ export function ChatSidebar({ conversationId, clientPhone, contactName, aiAttend
           <button
             type="button"
             onClick={() => handleRegisterOpenChange(true)}
-            disabled={aiAttending}
             className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-emerald-600 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-slate-200 disabled:hover:bg-white dark:border-slate-700 dark:bg-slate-900 dark:text-emerald-400 dark:hover:bg-emerald-500/10 dark:disabled:hover:bg-slate-900"
             aria-label={context?.cliente ? "Editar cliente" : "Registrar cliente"}
-            title={aiAttending ? "Kiments IA atiende este chat. Cambia a atención humana para registrar al cliente." : context?.cliente ? "Editar cliente" : "Registrar cliente"}
+            title={context?.cliente ? "Editar cliente" : "Registrar cliente"}
           >
             <UserPlusIcon className="h-3.5 w-3.5" />
           </button>
@@ -496,17 +505,7 @@ export function ChatSidebar({ conversationId, clientPhone, contactName, aiAttend
 
           </section>
 
-          {aiAttending ? (
-            <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-amber-300 bg-amber-50/60 px-4 py-6 text-center dark:border-amber-500/30 dark:bg-amber-500/10">
-              <SparklesIcon className="h-8 w-8 text-amber-500" />
-              <p className="text-xs font-semibold text-amber-800 dark:text-amber-200">
-                Kiments IA esta atendiendo este chat
-              </p>
-              <p className="text-[11px] leading-snug text-amber-700/80 dark:text-amber-200/70">
-                Cambia a atencion humana para vender o registrar al cliente.
-              </p>
-            </div>
-          ) : context ? (
+          {context ? (
             <CrmQuickSalePanelFlow
               conversationId={conversationId}
               context={context}
@@ -516,13 +515,11 @@ export function ChatSidebar({ conversationId, clientPhone, contactName, aiAttend
               onCompleted={handleSaleCompleted}
               onDraftChange={setSaleHasDraft}
               onPaymentPrepared={() => setSelectedComprobanteId(defaultComprobanteId(context.comprobantes))}
-              onCustomerChanged={() => {
-                void loadContext()
-                onClientUpdated?.()
-              }}
             />
           ) : null}
         </div>
+      )}
+        </>
       )}
 
       {isMobileDrawer ? (

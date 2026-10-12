@@ -1,5 +1,5 @@
 export const ADMIN_ROLE = "ADMINISTRADOR"
-export const CRM_STANDARD_USER_PATHS = ["/chat", "/contacto", "/etiquetas"] as const
+export const CRM_STANDARD_USER_PATHS = ["/chat", "/ventas", "/contacto", "/etiquetas"] as const
 
 export function isCrmAdmin(role: string | null | undefined): boolean {
   return role?.trim().toUpperCase() === ADMIN_ROLE

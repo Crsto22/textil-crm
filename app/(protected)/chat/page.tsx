@@ -59,11 +59,6 @@ import { ChatAvatar } from "@/components/chat/ChatAvatar";
 import type { ChatMessage, Conversation } from "@/components/chat/chat-data";
 import { ChatWallpaperLayer } from "@/components/chat/ChatWallpaperLayer";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
-import {
-  AiCopilotCard,
-  type AiRunsResponse,
-} from "@/components/chat/AiCopilotCard";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { authFetch } from "@/lib/auth/auth-fetch";
 import { useAuth } from "@/lib/auth/auth-context";
@@ -95,9 +90,9 @@ const MESSAGE_PAGE_SIZE = 15;
 const MESSAGE_CACHE_LIMIT = 5;
 
 type ConversationStatus = "ESPERA" | "ATENDIDO" | "RESUELTO";
-type AiAttentionMode = "AUTOMATICA" | "HUMANA";
-type AttentionQueue = "AI_ACTIVE" | "ADVISOR_REQUIRED" | "PAYMENT_VERIFICATION" | "HUMAN_ACTIVE" | "RESOLVED";
-type WaitingReason = "ADVISOR_REQUIRED" | "PAYMENT_VERIFICATION" | "AI_DISABLED" | "IMAGE_RECEIVED" | "AI_RESPONSE_FAILED";
+type AttentionQueue = "AGENT_ACTIVE" | "ADVISOR_REQUIRED" | "HUMAN_ACTIVE" | "RESOLVED";
+type WaitingReason = "ADVISOR_REQUIRED";
+type ConversationFilter = "all" | "agent" | "waiting" | "resolved";
 
 type CrmConversation = Conversation & {
   phone: string;
@@ -109,10 +104,11 @@ type CrmConversation = Conversation & {
   assignedUserId: number | null;
   assignedUserName: string | null;
   assignedAt: string | null;
-  aiAttentionMode: AiAttentionMode;
   attentionQueue: AttentionQueue;
   waitingReason: WaitingReason | null;
   waitingDetail: string | null;
+  agentState: string | null;
+  reservationExpiresAt: string | null;
   tags: ConversationTag[];
   lastMessageType: CrmMessageResponse["messageType"] | null;
 };
@@ -131,10 +127,11 @@ interface CrmConversationResponse {
   assignedUserId: number | null;
   assignedUserName: string | null;
   assignedAt: string | null;
-  aiAttentionMode?: AiAttentionMode | null;
   attentionQueue?: AttentionQueue | null;
   waitingReason?: WaitingReason | null;
   waitingDetail?: string | null;
+  agentState?: string | null;
+  reservationExpiresAt?: string | null;
   tags?: CrmConversationTagResponse[] | null;
 }
 
@@ -148,12 +145,12 @@ interface ConversationPageResponse {
   first: boolean;
   last: boolean;
   empty: boolean;
-  counts: {
-    all: number;
-    attended: number;
-    aiAttending: number;
-    waiting: number;
-    resolved: number;
+    counts: {
+      all: number;
+      attended: number;
+      agent: number;
+      waiting: number;
+      resolved: number;
   };
 }
 
@@ -173,7 +170,7 @@ interface CrmConversationTagResponse {
 interface CrmMessageResponse {
   id: number;
   direction: "INCOMING" | "OUTGOING" | "SYSTEM";
-  origin?: "EXTERNAL" | "HUMAN" | "CRM_SYSTEM" | "AI_AUTOMATIC";
+  origin?: "EXTERNAL" | "HUMAN" | "CRM_SYSTEM";
   messageType: "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "DOCUMENT" | "MEDIA" | "STICKER" | "VIEW_ONCE";
   body: string | null;
   status: ChatMessage["status"];
@@ -202,21 +199,14 @@ interface MessagePageResponse {
 
 interface CrmRealtimeEvent {
   type: "conversation.updated" | "conversation.removed" | "message.created" | "message.updated" | "message.deleted"
-    | "ai.processing" | "ai.draft.created" | "ai.processing.completed" | "ai.retry.scheduled" | "ai.failed"
-    | "ai.memory.updated" | "ai.auto_reply.sent" | "ai.handoff.required" | "ai.limit.reached"
-    | "ai.sale_draft.updated" | "ai.sale_draft.ready" | "ai.sale_draft.expired" | "ai.sale_draft.completed"
     | "payment.evidence.processing" | "payment.evidence.updated" | "payment.request.updated" | "payment.request.completed"
     | "whatsapp.connection.updated";
   conversationId: number;
   conversation?: CrmConversationResponse;
   message?: CrmMessageResponse | null;
-  jobId?: number;
-  runId?: number;
   status?: string;
-  requiresHuman?: boolean;
   reason?: string;
   waitingReason?: WaitingReason;
-  memory?: AiMemoryResponse;
   connection?: WhatsappConnectionState;
   data?: unknown;
 }
@@ -232,89 +222,6 @@ interface WhatsappConnectionState {
   blockedReason: string;
   disconnectedAt: string | null;
   phoneChangedAt: string | null;
-}
-
-interface ActivePaymentReview {
-  idPaymentRequest: number;
-  evidenceId: number;
-  evidenceMessageId: number;
-  evidenceStatus: string;
-  advisorAccepted: boolean;
-  status: string;
-  expectedAmount: number;
-  currency: string;
-  reservationStatus: string;
-  expiresAt: string | null;
-  paymentMethod: string;
-  operationCode: string | null;
-  operationAt: string | null;
-  detectedAmount: number | null;
-  detectedProvider: string | null;
-}
-
-interface PaymentEvidenceDetail {
-  idPaymentEvidence: number;
-  validationStatus: string;
-  processingStatus: string;
-  mimeType: string;
-  provider: string | null;
-  amount: number | null;
-  currency: string | null;
-  operationCode: string | null;
-  operationAt: string | null;
-  confidence: number | null;
-  warnings: string[];
-  mediaUrl: string;
-}
-
-interface PaymentDecisionResponse {
-  evidence: PaymentEvidenceDetail;
-  request: ActivePaymentReview | null;
-  conversation: CrmConversationResponse;
-}
-
-interface AiMemoryItem {
-  productId: number | null;
-  variantId: number | null;
-  productName: string;
-  color: string;
-  size: string;
-  quantity: number;
-}
-
-interface AiMemoryResponse {
-  attentionMode: AiAttentionMode;
-  attentionState: "AUTOMATICA" | "HUMANA" | "PAUSADA";
-  currentIntent: string;
-  productId: number | null;
-  variantId: number | null;
-  productName: string;
-  color: string;
-  size: string;
-  quantity: number | null;
-  consecutiveAutoResponses: number;
-  expiresAt: string | null;
-  cart: AiMemoryItem[];
-}
-
-interface AiAttentionResponse {
-  conversation: CrmConversationResponse;
-  memory: AiMemoryResponse;
-  automaticAvailable: boolean;
-  blockedReason: string;
-}
-
-interface AiDecisionResponse {
-  idRun: number;
-  decision: "APPROVED" | "EDITED" | "DISCARDED";
-  finalText: string | null;
-  similarityPercentage: number | null;
-  changedCharacters: number | null;
-  discardReason: string | null;
-  sendStatus: string;
-  reviewerId: number;
-  reviewedAt: string;
-  message: CrmMessageResponse | null;
 }
 
 interface MessageCacheMeta {
@@ -404,18 +311,18 @@ const mapConversation = (conversation: CrmConversationResponse): CrmConversation
     initials: getInitials(conversation.contactName, visiblePhone),
     active: false,
     unreadCount: conversation.unreadCount || undefined,
-    waiting: conversation.status === "ESPERA",
+    waiting: conversation.attentionQueue === "ADVISOR_REQUIRED",
     lastMessageAt: conversation.lastMessageAt,
     assignedUserId: conversation.assignedUserId,
     assignedUserName: conversation.assignedUserName,
     assignedAt: conversation.assignedAt,
-    aiAttentionMode: conversation.aiAttentionMode ?? (conversation.assignedUserId ? "HUMANA" : "AUTOMATICA"),
     attentionQueue: conversation.attentionQueue
       ?? (conversation.status === "RESUELTO" ? "RESOLVED"
-        : conversation.assignedUserId ? "HUMAN_ACTIVE"
-          : conversation.aiAttentionMode === "HUMANA" ? "ADVISOR_REQUIRED" : "AI_ACTIVE"),
+        : conversation.assignedUserId ? "HUMAN_ACTIVE" : "ADVISOR_REQUIRED"),
     waitingReason: conversation.waitingReason ?? null,
     waitingDetail: conversation.waitingDetail ?? null,
+    agentState: conversation.agentState ?? null,
+    reservationExpiresAt: conversation.reservationExpiresAt ?? null,
     tags: (conversation.tags ?? []).map(mapConversationTag),
   };
 };
@@ -480,7 +387,6 @@ const mapMessage = (
       : hasMedia ? mediaFileName || bodyText : bodyText,
     time: formatChatTime(message.createdAt),
     status: message.status || "sent",
-    aiGenerated: message.origin === "AI_AUTOMATIC",
     fileType: message.mediaMimeType || undefined,
     fileUrl: mediaObjectUrl ?? message.mediaUrl ?? undefined,
     audioUrl: isOutgoingAudio || isIncomingAudio ? mediaObjectUrl ?? message.mediaUrl ?? undefined : undefined,
@@ -746,63 +652,63 @@ const mobileEmojiCategories = [
     label: "Caras",
     icon: FaceSmileIcon,
     emojis: [
-      "😀",
-      "😃",
-      "😄",
-      "😁",
-      "😆",
-      "🥹",
-      "😅",
-      "😂",
-      "🤣",
-      "🥲",
-      "😊",
-      "☺️",
-      "😇",
-      "🙂",
-      "🙃",
-      "😉",
-      "😌",
-      "😍",
-      "🥰",
-      "😘",
-      "😗",
-      "😙",
-      "😚",
-      "😋",
-      "😛",
-      "😝",
-      "😜",
-      "🤪",
-      "🤨",
-      "🧐",
-      "🤓",
-      "😎",
-      "🥳",
-      "😏",
-      "😒",
-      "😞",
-      "😔",
-      "😟",
-      "😕",
-      "🙁",
-      "☹️",
-      "😣",
-      "😖",
-      "😫",
-      "😩",
-      "🥺",
-      "😢",
-      "😭",
-      "😤",
-      "😠",
-      "😡",
-      "🤬",
-      "🤯",
-      "😳",
-      "🥵",
-      "🥶",
-      "😱",
+      "Ã°Å¸Ëœâ‚¬",
+      "Ã°Å¸ËœÆ’",
+      "Ã°Å¸Ëœâ€ž",
+      "Ã°Å¸ËœÂ",
+      "Ã°Å¸Ëœâ€ ",
+      "Ã°Å¸Â¥Â¹",
+      "Ã°Å¸Ëœâ€¦",
+      "Ã°Å¸Ëœâ€š",
+      "Ã°Å¸Â¤Â£",
+      "Ã°Å¸Â¥Â²",
+      "Ã°Å¸ËœÅ ",
+      "Ã¢ËœÂºÃ¯Â¸Â",
+      "Ã°Å¸Ëœâ€¡",
+      "Ã°Å¸â„¢â€š",
+      "Ã°Å¸â„¢Æ’",
+      "Ã°Å¸Ëœâ€°",
+      "Ã°Å¸ËœÅ’",
+      "Ã°Å¸ËœÂ",
+      "Ã°Å¸Â¥Â°",
+      "Ã°Å¸ËœËœ",
+      "Ã°Å¸Ëœâ€”",
+      "Ã°Å¸Ëœâ„¢",
+      "Ã°Å¸ËœÅ¡",
+      "Ã°Å¸Ëœâ€¹",
+      "Ã°Å¸Ëœâ€º",
+      "Ã°Å¸ËœÂ",
+      "Ã°Å¸ËœÅ“",
+      "Ã°Å¸Â¤Âª",
+      "Ã°Å¸Â¤Â¨",
+      "Ã°Å¸Â§Â",
+      "Ã°Å¸Â¤â€œ",
+      "Ã°Å¸ËœÅ½",
+      "Ã°Å¸Â¥Â³",
+      "Ã°Å¸ËœÂ",
+      "Ã°Å¸Ëœâ€™",
+      "Ã°Å¸ËœÅ¾",
+      "Ã°Å¸Ëœâ€",
+      "Ã°Å¸ËœÅ¸",
+      "Ã°Å¸Ëœâ€¢",
+      "Ã°Å¸â„¢Â",
+      "Ã¢ËœÂ¹Ã¯Â¸Â",
+      "Ã°Å¸ËœÂ£",
+      "Ã°Å¸Ëœâ€“",
+      "Ã°Å¸ËœÂ«",
+      "Ã°Å¸ËœÂ©",
+      "Ã°Å¸Â¥Âº",
+      "Ã°Å¸ËœÂ¢",
+      "Ã°Å¸ËœÂ­",
+      "Ã°Å¸ËœÂ¤",
+      "Ã°Å¸ËœÂ ",
+      "Ã°Å¸ËœÂ¡",
+      "Ã°Å¸Â¤Â¬",
+      "Ã°Å¸Â¤Â¯",
+      "Ã°Å¸ËœÂ³",
+      "Ã°Å¸Â¥Âµ",
+      "Ã°Å¸Â¥Â¶",
+      "Ã°Å¸ËœÂ±",
     ],
   },
   {
@@ -810,38 +716,38 @@ const mobileEmojiCategories = [
     label: "Gestos",
     icon: HandRaisedIcon,
     emojis: [
-      "👋",
-      "🤚",
-      "🖐️",
-      "✋",
-      "🖖",
-      "👌",
-      "🤌",
-      "🤏",
-      "✌️",
-      "🤞",
-      "🫰",
-      "🤟",
-      "🤘",
-      "🤙",
-      "👈",
-      "👉",
-      "👆",
-      "🖕",
-      "👇",
-      "☝️",
-      "👍",
-      "👎",
-      "✊",
-      "👊",
-      "🤛",
-      "🤜",
-      "👏",
-      "🙌",
-      "🫶",
-      "🤲",
-      "🤝",
-      "🙏",
+      "Ã°Å¸â€˜â€¹",
+      "Ã°Å¸Â¤Å¡",
+      "Ã°Å¸â€“ÂÃ¯Â¸Â",
+      "Ã¢Å“â€¹",
+      "Ã°Å¸â€“â€“",
+      "Ã°Å¸â€˜Å’",
+      "Ã°Å¸Â¤Å’",
+      "Ã°Å¸Â¤Â",
+      "Ã¢Å“Å’Ã¯Â¸Â",
+      "Ã°Å¸Â¤Å¾",
+      "Ã°Å¸Â«Â°",
+      "Ã°Å¸Â¤Å¸",
+      "Ã°Å¸Â¤Ëœ",
+      "Ã°Å¸Â¤â„¢",
+      "Ã°Å¸â€˜Ë†",
+      "Ã°Å¸â€˜â€°",
+      "Ã°Å¸â€˜â€ ",
+      "Ã°Å¸â€“â€¢",
+      "Ã°Å¸â€˜â€¡",
+      "Ã¢ËœÂÃ¯Â¸Â",
+      "Ã°Å¸â€˜Â",
+      "Ã°Å¸â€˜Å½",
+      "Ã¢Å“Å ",
+      "Ã°Å¸â€˜Å ",
+      "Ã°Å¸Â¤â€º",
+      "Ã°Å¸Â¤Å“",
+      "Ã°Å¸â€˜Â",
+      "Ã°Å¸â„¢Å’",
+      "Ã°Å¸Â«Â¶",
+      "Ã°Å¸Â¤Â²",
+      "Ã°Å¸Â¤Â",
+      "Ã°Å¸â„¢Â",
     ],
   },
   {
@@ -849,30 +755,30 @@ const mobileEmojiCategories = [
     label: "Amor",
     icon: HeartIcon,
     emojis: [
-      "❤️",
-      "🧡",
-      "💛",
-      "💚",
-      "💙",
-      "💜",
-      "🖤",
-      "🤍",
-      "🤎",
-      "💔",
-      "❣️",
-      "💕",
-      "💞",
-      "💓",
-      "💗",
-      "💖",
-      "💘",
-      "💝",
-      "💟",
-      "♥️",
-      "💋",
-      "💯",
-      "🔥",
-      "✨",
+      "Ã¢ÂÂ¤Ã¯Â¸Â",
+      "Ã°Å¸Â§Â¡",
+      "Ã°Å¸â€™â€º",
+      "Ã°Å¸â€™Å¡",
+      "Ã°Å¸â€™â„¢",
+      "Ã°Å¸â€™Å“",
+      "Ã°Å¸â€“Â¤",
+      "Ã°Å¸Â¤Â",
+      "Ã°Å¸Â¤Å½",
+      "Ã°Å¸â€™â€",
+      "Ã¢ÂÂ£Ã¯Â¸Â",
+      "Ã°Å¸â€™â€¢",
+      "Ã°Å¸â€™Å¾",
+      "Ã°Å¸â€™â€œ",
+      "Ã°Å¸â€™â€”",
+      "Ã°Å¸â€™â€“",
+      "Ã°Å¸â€™Ëœ",
+      "Ã°Å¸â€™Â",
+      "Ã°Å¸â€™Å¸",
+      "Ã¢â„¢Â¥Ã¯Â¸Â",
+      "Ã°Å¸â€™â€¹",
+      "Ã°Å¸â€™Â¯",
+      "Ã°Å¸â€Â¥",
+      "Ã¢Å“Â¨",
     ],
   },
   {
@@ -880,38 +786,38 @@ const mobileEmojiCategories = [
     label: "Objetos",
     icon: SparklesIcon,
     emojis: [
-      "🎉",
-      "🎊",
-      "🎁",
-      "🛍️",
-      "🧾",
-      "📦",
-      "📌",
-      "📍",
-      "✂️",
-      "🧵",
-      "🪡",
-      "👕",
-      "👚",
-      "👗",
-      "🧥",
-      "👖",
-      "🧢",
-      "👟",
-      "👜",
-      "💼",
-      "📱",
-      "☎️",
-      "💬",
-      "✅",
-      "☑️",
-      "❌",
-      "⚠️",
-      "⭐",
-      "🌟",
-      "💰",
-      "💳",
-      "🚚",
+      "Ã°Å¸Å½â€°",
+      "Ã°Å¸Å½Å ",
+      "Ã°Å¸Å½Â",
+      "Ã°Å¸â€ºÂÃ¯Â¸Â",
+      "Ã°Å¸Â§Â¾",
+      "Ã°Å¸â€œÂ¦",
+      "Ã°Å¸â€œÅ’",
+      "Ã°Å¸â€œÂ",
+      "Ã¢Å“â€šÃ¯Â¸Â",
+      "Ã°Å¸Â§Âµ",
+      "Ã°Å¸ÂªÂ¡",
+      "Ã°Å¸â€˜â€¢",
+      "Ã°Å¸â€˜Å¡",
+      "Ã°Å¸â€˜â€”",
+      "Ã°Å¸Â§Â¥",
+      "Ã°Å¸â€˜â€“",
+      "Ã°Å¸Â§Â¢",
+      "Ã°Å¸â€˜Å¸",
+      "Ã°Å¸â€˜Å“",
+      "Ã°Å¸â€™Â¼",
+      "Ã°Å¸â€œÂ±",
+      "Ã¢ËœÅ½Ã¯Â¸Â",
+      "Ã°Å¸â€™Â¬",
+      "Ã¢Å“â€¦",
+      "Ã¢Ëœâ€˜Ã¯Â¸Â",
+      "Ã¢ÂÅ’",
+      "Ã¢Å¡Â Ã¯Â¸Â",
+      "Ã¢Â­Â",
+      "Ã°Å¸Å’Å¸",
+      "Ã°Å¸â€™Â°",
+      "Ã°Å¸â€™Â³",
+      "Ã°Å¸Å¡Å¡",
     ],
   },
   {
@@ -919,38 +825,38 @@ const mobileEmojiCategories = [
     label: "Simbolos",
     icon: SwatchIcon,
     emojis: [
-      "🔴",
-      "🟠",
-      "🟡",
-      "🟢",
-      "🔵",
-      "🟣",
-      "⚫",
-      "⚪",
-      "⬛",
-      "⬜",
-      "🟥",
-      "🟧",
-      "🟨",
-      "🟩",
-      "🟦",
-      "🟪",
-      "⬆️",
-      "➡️",
-      "⬇️",
-      "⬅️",
-      "↗️",
-      "↘️",
-      "🔁",
-      "🔔",
-      "🔕",
-      "📣",
-      "🔒",
-      "🔓",
-      "🔎",
-      "💡",
-      "📅",
-      "⏰",
+      "Ã°Å¸â€Â´",
+      "Ã°Å¸Å¸Â ",
+      "Ã°Å¸Å¸Â¡",
+      "Ã°Å¸Å¸Â¢",
+      "Ã°Å¸â€Âµ",
+      "Ã°Å¸Å¸Â£",
+      "Ã¢Å¡Â«",
+      "Ã¢Å¡Âª",
+      "Ã¢Â¬â€º",
+      "Ã¢Â¬Å“",
+      "Ã°Å¸Å¸Â¥",
+      "Ã°Å¸Å¸Â§",
+      "Ã°Å¸Å¸Â¨",
+      "Ã°Å¸Å¸Â©",
+      "Ã°Å¸Å¸Â¦",
+      "Ã°Å¸Å¸Âª",
+      "Ã¢Â¬â€ Ã¯Â¸Â",
+      "Ã¢Å¾Â¡Ã¯Â¸Â",
+      "Ã¢Â¬â€¡Ã¯Â¸Â",
+      "Ã¢Â¬â€¦Ã¯Â¸Â",
+      "Ã¢â€ â€”Ã¯Â¸Â",
+      "Ã¢â€ ËœÃ¯Â¸Â",
+      "Ã°Å¸â€Â",
+      "Ã°Å¸â€â€",
+      "Ã°Å¸â€â€¢",
+      "Ã°Å¸â€œÂ£",
+      "Ã°Å¸â€â€™",
+      "Ã°Å¸â€â€œ",
+      "Ã°Å¸â€Å½",
+      "Ã°Å¸â€™Â¡",
+      "Ã°Å¸â€œâ€¦",
+      "Ã¢ÂÂ°",
     ],
   },
 ];
@@ -1130,6 +1036,56 @@ function MobileEmojiPanel({
   );
 }
 
+const AGENT_STATE_LABELS: Record<string, string> = {
+  IDLE: "IA Kiments atendiendo",
+  EXPLORANDO_PRODUCTOS: "Buscando productos",
+  ARMANDO_CARRITO: "Armando carrito",
+  ESPERANDO_DATOS_CLIENTE: "Esperando datos del cliente",
+  ESPERANDO_METODO_PAGO: "Esperando método de pago",
+  ESPERANDO_COMPROBANTE: "Esperando comprobante",
+  VALIDANDO_COMPROBANTE: "Validando comprobante",
+  ESPERANDO_METODO_ENTREGA: "Configurando entrega",
+  ESPERANDO_DATOS_SHALOM: "Esperando datos de Shalom",
+  ESPERANDO_CONFIRMACION_AGENCIA_SHALOM: "Confirmando agencia Shalom",
+  ESPERANDO_DECISION_FILM: "Esperando decisión de film",
+  ESPERANDO_PAGO_FILM: "Esperando pago del film",
+  LISTO_PARA_VENTA: "Preparando Nota de Venta",
+  VENTA_PENDIENTE_REVISION: "Venta pendiente de revisión",
+  COMPLETADO: "Atención completada",
+  CANCELADO: "Atención cancelada",
+  REQUIERE_AYUDA: "Requiere ayuda humana",
+};
+
+function AgentConversationStatus({ state, expiresAt }: { state: string | null; expiresAt: string | null }) {
+  const calculateRemaining = useCallback(() => {
+    if (!expiresAt) return 0;
+    const timestamp = new Date(expiresAt).getTime();
+    return Number.isFinite(timestamp) ? Math.max(0, Math.ceil((timestamp - Date.now()) / 1000)) : 0;
+  }, [expiresAt]);
+  const [remaining, setRemaining] = useState(calculateRemaining);
+
+  useEffect(() => {
+    if (!expiresAt) return;
+    const interval = window.setInterval(() => setRemaining(calculateRemaining()), 1000);
+    return () => window.clearInterval(interval);
+  }, [calculateRemaining, expiresAt]);
+
+  return (
+    <span className="mt-1.5 inline-flex max-w-full items-center gap-1.5 rounded-full border border-sky-200/80 bg-sky-50 px-2 py-1 text-left text-[10px] font-semibold leading-none text-sky-800 shadow-sm dark:border-sky-800 dark:bg-sky-950/70 dark:text-sky-200">
+      <span className="relative flex h-2 w-2 shrink-0">
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-50" />
+        <span className="relative inline-flex h-2 w-2 rounded-full bg-sky-500" />
+      </span>
+      <span className="truncate">{AGENT_STATE_LABELS[state ?? ""] ?? "IA Kiments atendiendo"}</span>
+      {expiresAt && remaining > 0 && (
+        <span className="shrink-0 rounded-full bg-sky-100 px-1.5 py-0.5 font-bold tabular-nums text-sky-700 dark:bg-sky-900 dark:text-sky-100">
+          {formatAudioDuration(remaining)}
+        </span>
+      )}
+    </span>
+  );
+}
+
 function ConversationRow({
   conversation,
   accepting,
@@ -1187,24 +1143,10 @@ function ConversationRow({
             </span>
           )}
         </div>
+        {conversation.attentionQueue === "AGENT_ACTIVE" && <AgentConversationStatus state={conversation.agentState} expiresAt={conversation.reservationExpiresAt} />}
         {conversation.waitingReason && (
-          <span className={cn(
-            "mt-1.5 inline-flex max-w-full items-center rounded px-2 py-0.5 text-left text-[10px] font-semibold leading-snug",
-            conversation.waitingReason === "PAYMENT_VERIFICATION"
-              ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
-              : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
-          )} title={conversation.waitingDetail ?? undefined}>
-            {conversation.waitingDetail
-              ? conversation.waitingDetail
-              : conversation.waitingReason === "PAYMENT_VERIFICATION"
-              ? "Verificacion de pago"
-              : conversation.waitingReason === "AI_DISABLED"
-                ? "IA desactivada"
-                : conversation.waitingReason === "IMAGE_RECEIVED"
-                  ? "Imagen recibida"
-                : conversation.waitingReason === "AI_RESPONSE_FAILED"
-                  ? "La IA no pudo responder"
-                : "Necesita asesor"}
+          <span className="mt-1.5 inline-flex max-w-full items-center rounded bg-amber-100 px-2 py-0.5 text-left text-[10px] font-semibold leading-snug text-amber-800 dark:bg-amber-950 dark:text-amber-200" title={conversation.waitingDetail ?? undefined}>
+            {conversation.waitingDetail || "Necesita asesor"}
           </span>
         )}
         {tags.length > 0 && (
@@ -1383,137 +1325,10 @@ function MessageActions({
   );
 }
 
-function PaymentReviewModal({
-  review,
-  open,
-  onOpenChange,
-  onAccept,
-  onReject,
-  loading,
-}: {
-  review: ActivePaymentReview | null;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onAccept: () => void;
-  onReject: () => void;
-  loading: boolean;
-}) {
-  const [detail, setDetail] = useState<PaymentEvidenceDetail | null>(null);
-  const [zoomed, setZoomed] = useState(false);
-  const mediaUrl = useAuthenticatedBlobUrl(
-    review ? `/api/crm/whatsapp/payment-evidences/${review.evidenceId}/media` : undefined,
-    open,
-  );
-
-  useEffect(() => {
-    if (!open || !review) return;
-    const controller = new AbortController();
-    void authFetch(`/api/crm/whatsapp/payment-evidences/${review.evidenceId}`, {
-      cache: "no-store",
-      signal: controller.signal,
-    })
-      .then(async (response) => {
-        if (!response.ok) throw new Error(await readApiMessage(response, "No se pudo cargar el comprobante"));
-        return response.json() as Promise<PaymentEvidenceDetail>;
-      })
-      .then((data) => setDetail(data))
-      .catch((error) => {
-        if (!controller.signal.aborted) toast.error(error instanceof Error ? error.message : "No se pudo cargar el comprobante");
-      });
-    return () => controller.abort();
-  }, [open, review]);
-
-  const currentDetail = detail?.idPaymentEvidence === review?.evidenceId ? detail : null;
-  const amount = currentDetail?.amount ?? review?.detectedAmount;
-  const operationCode = currentDetail?.operationCode ?? review?.operationCode;
-  const operationAt = currentDetail?.operationAt ?? review?.operationAt;
-  const provider = currentDetail?.provider ?? review?.detectedProvider;
-
-  return (
-    <Dialog open={open} onOpenChange={(next) => {
-      if (!next) setZoomed(false);
-      if (!loading) onOpenChange(next);
-    }}>
-      <DialogContent
-        className="!bottom-0 !left-0 !top-auto !max-h-[96dvh] !w-full !max-w-none !translate-x-0 !translate-y-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden rounded-b-none rounded-t-xl p-0 data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom sm:!bottom-auto sm:!left-1/2 sm:!top-1/2 sm:!h-[min(88dvh,760px)] sm:!w-[min(94vw,920px)] sm:!max-w-[920px] sm:!-translate-x-1/2 sm:!-translate-y-1/2 sm:rounded-lg sm:data-[state=closed]:zoom-out-95 sm:data-[state=open]:zoom-in-95"
-        showCloseButton={!loading}
-      >
-        <DialogHeader className="border-b px-4 py-4 pr-12 sm:px-5">
-          <DialogTitle>Revisar comprobante de pago</DialogTitle>
-          <p className="text-xs text-muted-foreground">Verifica la captura completa antes de tomar una decisión.</p>
-        </DialogHeader>
-
-        <div className="grid min-h-0 overflow-y-auto sm:grid-cols-[minmax(0,1.45fr)_minmax(260px,0.75fr)] sm:overflow-hidden">
-          <div className="flex min-h-[42dvh] items-center justify-center overflow-auto bg-muted/40 p-3 sm:min-h-0 sm:p-5">
-            {mediaUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={mediaUrl}
-                alt="Comprobante de pago"
-                className={cn(
-                  "cursor-zoom-in object-contain transition-[max-width,max-height]",
-                  zoomed ? "max-h-none max-w-none cursor-zoom-out" : "max-h-full max-w-full",
-                )}
-                onClick={() => setZoomed((current) => !current)}
-              />
-            ) : (
-              <div className="h-64 w-full max-w-sm animate-pulse rounded bg-muted" />
-            )}
-          </div>
-
-          <div className="space-y-4 border-t p-4 sm:overflow-y-auto sm:border-l sm:border-t-0 sm:p-5">
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <div className="rounded-md border p-3">
-                <p className="text-muted-foreground">Monto esperado</p>
-                <p className="mt-1 font-semibold">{review ? `${review.currency || "PEN"} ${Number(review.expectedAmount).toFixed(2)}` : "-"}</p>
-              </div>
-              <div className="rounded-md border p-3">
-                <p className="text-muted-foreground">Monto detectado</p>
-                <p className="mt-1 font-semibold">{amount == null ? "No detectado" : `${currentDetail?.currency || review?.currency || "PEN"} ${Number(amount).toFixed(2)}`}</p>
-              </div>
-              <div className="rounded-md border p-3">
-                <p className="text-muted-foreground">Operación</p>
-                <p className="mt-1 break-all font-semibold">{operationCode || "No detectada"}</p>
-              </div>
-              <div className="rounded-md border p-3">
-                <p className="text-muted-foreground">Medio detectado</p>
-                <p className="mt-1 font-semibold">{provider || "No detectado"}</p>
-              </div>
-            </div>
-            <div className="rounded-md border p-3 text-xs">
-              <p className="text-muted-foreground">Fecha y hora</p>
-              <p className="mt-1 font-semibold">{operationAt ? new Date(operationAt).toLocaleString("es-PE") : "No detectada"}</p>
-            </div>
-            <div className="rounded-md border p-3 text-xs">
-              <p className="text-muted-foreground">Reserva</p>
-              <p className="mt-1 font-semibold">{review?.reservationStatus === "ACTIVE" ? "Stock reservado" : review?.reservationStatus || "-"}</p>
-            </div>
-            {currentDetail?.warnings?.length ? (
-              <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
-                {currentDetail.warnings.map((warning) => <p key={warning}>{warning}</p>)}
-              </div>
-            ) : null}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-2 border-t bg-background p-3 sm:flex sm:justify-end sm:p-4">
-          <Button type="button" variant="destructive" disabled={loading} onClick={onReject}>
-            Rechazar pago
-          </Button>
-          <Button type="button" className="bg-emerald-600 hover:bg-emerald-700" disabled={loading} onClick={onAccept}>
-            {loading ? "Procesando..." : "Aceptar pago"}
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 function MessageBubble({
   item,
   onOpenImagePreview,
-  paymentReview,
-  onOpenPaymentReview,
   onRetry,
   onReply,
   onDelete,
@@ -1522,8 +1337,6 @@ function MessageBubble({
 }: {
   item: ChatMessage;
   onOpenImagePreview: (image: { alt: string; url: string }) => void;
-  paymentReview?: ActivePaymentReview | null;
-  onOpenPaymentReview?: () => void;
   onRetry?: (message: ChatMessage) => void;
   onReply?: (message: ChatMessage) => void;
   onDelete?: (message: ChatMessage) => void;
@@ -1541,10 +1354,6 @@ function MessageBubble({
     && Boolean(item.fileUrl);
   const visualMediaUrl = useAuthenticatedBlobUrl(item.fileUrl, isVisualMedia && isNearViewport);
   const authenticatedAudioUrl = useAuthenticatedBlobUrl(item.audioUrl, audioRequested);
-  const deletedPaymentMediaUrl = useAuthenticatedBlobUrl(
-    paymentReview ? `/api/crm/whatsapp/payment-evidences/${paymentReview.evidenceId}/media` : undefined,
-    Boolean(paymentReview && item.deleted),
-  );
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -1680,47 +1489,6 @@ function MessageBubble({
 
   if (item.deleted) {
     const outgoing = item.type === "outgoing" || item.type === "outgoing-file" || item.type === "outgoing-audio";
-    if (paymentReview) {
-      return (
-        <div className="mr-auto w-fit max-w-[88%] rounded-md border border-amber-300 bg-card p-1.5 text-sm text-card-foreground shadow-sm md:max-w-[55%]">
-          <div className="mb-1.5 flex items-center justify-between gap-3 px-1">
-            <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-1 text-[10px] font-bold not-italic text-amber-800 dark:bg-amber-500/15 dark:text-amber-200">
-              <ExclamationTriangleIcon className="h-3.5 w-3.5" />
-              Eliminado por el cliente
-            </span>
-            <span className="text-[10px] text-muted-foreground">{item.time}</span>
-          </div>
-          {deletedPaymentMediaUrl ? (
-            <button
-              type="button"
-              onClick={onOpenPaymentReview}
-              className="block h-56 w-[min(68vw,300px)] overflow-hidden rounded bg-muted"
-              aria-label="Abrir comprobante eliminado"
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={deletedPaymentMediaUrl}
-                alt="Comprobante de pago eliminado por el cliente"
-                className="h-full w-full object-cover"
-              />
-            </button>
-          ) : (
-            <div className="flex h-32 w-[min(68vw,300px)] items-center justify-center rounded bg-muted px-4 text-center text-xs text-muted-foreground">
-              Comprobante conservado para revisión de pago
-            </div>
-          )}
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="mt-1.5 h-8 w-full border-emerald-300 bg-emerald-50 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300"
-            onClick={onOpenPaymentReview}
-          >
-            Ver pago
-          </Button>
-        </div>
-      );
-    }
     return (
       <div className={`w-fit max-w-[88%] rounded-md px-3 py-2 text-sm italic shadow-sm md:max-w-[55%] ${
         outgoing ? "whatsapp-outgoing-bubble ml-auto" : "mr-auto bg-card text-muted-foreground"
@@ -1800,17 +1568,6 @@ function MessageBubble({
                 {mediaCaption}
               </p>
             ) : null}
-            {paymentReview ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="h-8 w-full border-emerald-300 bg-emerald-50 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300"
-                onClick={onOpenPaymentReview}
-              >
-                Ver pago
-              </Button>
-            ) : null}
           </div>
         ) : isVideoAttachment ? (
           visualMediaUrl ? (
@@ -1850,9 +1607,9 @@ function MessageBubble({
                   {item.text}
                 </p>
                 <p className="mt-0.5 text-xs text-white/65">
-                  {item.pageCount ? `${item.pageCount} paginas · ` : ""}
+                  {item.pageCount ? `${item.pageCount} paginas Ã‚Â· ` : ""}
                   PDF
-                  {item.fileSize ? ` · ${formatFileSize(item.fileSize)}` : ""}
+                  {item.fileSize ? ` Ã‚Â· ${formatFileSize(item.fileSize)}` : ""}
                 </p>
               </div>
               {item.fileUrl && (
@@ -1920,7 +1677,7 @@ function MessageBubble({
               onClick={() => onRetry?.(item)}
               className="ml-2 rounded-full bg-red-500/10 px-2 py-0.5 font-semibold text-red-600 hover:bg-red-500/20 dark:text-red-300"
             >
-              Error · Reintentar
+              Error Ã‚Â· Reintentar
             </button>
           ) : isOutgoingFile ? (
             <MessageStatusChecks status={item.status} />
@@ -2011,7 +1768,7 @@ function MessageBubble({
               onClick={() => onRetry?.(item)}
               className="ml-2 rounded-full bg-red-500/10 px-2 py-0.5 font-semibold text-red-600 hover:bg-red-500/20 dark:text-red-300"
             >
-              Error · Reintentar
+              Error Ã‚Â· Reintentar
             </button>
           ) : isOutgoingAudio ? (
             <MessageStatusChecks status={item.status} />
@@ -2042,7 +1799,7 @@ function MessageBubble({
               onClick={() => onRetry?.(item)}
               className="ml-2 rounded-full bg-red-500/10 px-2 py-0.5 font-semibold text-red-600 hover:bg-red-500/20 dark:text-red-300"
             >
-              Error · Reintentar
+              Error Ã‚Â· Reintentar
             </button>
           ) : (
             <MessageStatusChecks status={item.status} />
@@ -2202,9 +1959,6 @@ export default function ChatPage() {
   const [isMessagesLoading, setIsMessagesLoading] = useState(false);
   const [isOlderMessagesLoading, setIsOlderMessagesLoading] = useState(false);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
-  const [activePaymentReview, setActivePaymentReview] = useState<ActivePaymentReview | null>(null);
-  const [paymentDecisionLoading, setPaymentDecisionLoading] = useState(false);
-  const [paymentReviewOpen, setPaymentReviewOpen] = useState(false);
   const setChatError = (...messages: string[]) => {
     void messages;
   };
@@ -2219,7 +1973,7 @@ export default function ChatPage() {
   const handledRequestedConversationRef = useRef<string | null>(null);
   const allMessagesRef = useRef<Record<string, ChatMessage[]>>({});
   const sentAttachmentUrlsRef = useRef<string[]>([]);
-  const [activeFilter, setActiveFilter] = useState<"all" | "ai" | "waiting" | "resolved">("all");
+  const [activeFilter, setActiveFilter] = useState<ConversationFilter>("all");
   const [conversationSearchInput, setConversationSearchInput] = useState("");
   const [conversationSearch, setConversationSearch] = useState("");
   const [selectedTagFilterId, setSelectedTagFilterId] = useState<string | null>(null);
@@ -2237,29 +1991,10 @@ export default function ChatPage() {
   const realtimeStatusRef = useRef<"connecting" | "live" | "reconnecting">("connecting");
   const realtimeEventHandlerRef = useRef<(event: CrmRealtimeEvent) => void>(() => undefined);
   const realtimeResyncRef = useRef<() => void>(() => undefined);
-  const aiCacheRef = useRef<Record<string, AiRunsResponse>>({});
-  const aiCacheLruRef = useRef<string[]>([]);
-  const aiRequestRef = useRef(0);
-  const aiFallbackTimerRef = useRef<number | null>(null);
-  const aiRunsRefreshTimerRef = useRef<number | null>(null);
-  const aiLastRunsRefreshKeyRef = useRef<string | null>(null);
-  const aiPendingJobRef = useRef<number | null>(null);
-  const aiPanelConversationRef = useRef<string | null>(null);
-  const aiDraftRunIdRef = useRef<number | null>(null);
-  const aiFailureEventJobsRef = useRef<Set<number>>(new Set());
-  const [activeAiState, setActiveAiState] = useState<AiRunsResponse | null>(null);
-  const [activeAiMemory, setActiveAiMemory] = useState<AiMemoryResponse | null>(null);
-  const [activeAiAttention, setActiveAiAttention] = useState<AiAttentionResponse | null>(null);
-  const [isChangingAiAttention, setIsChangingAiAttention] = useState(false);
-  const [aiDraftText, setAiDraftText] = useState("");
-  const [isAiPanelOpen, setIsAiPanelOpen] = useState(false);
-  const [isAiProcessing, setIsAiProcessing] = useState(false);
-  const [isAiSubmitting, setIsAiSubmitting] = useState(false);
-  const [aiError, setAiError] = useState("");
   const [conversationCounts, setConversationCounts] = useState({
     all: 0,
     attended: 0,
-    aiAttending: 0,
+    agent: 0,
     waiting: 0,
     resolved: 0,
   });
@@ -2294,16 +2029,16 @@ export default function ChatPage() {
       : reset
         ? CONVERSATION_PAGE_SIZE
         : Math.max(CONVERSATION_PAGE_SIZE, Math.ceil(loadedCount / CONVERSATION_PAGE_SIZE) * CONVERSATION_PAGE_SIZE);
-    const view = activeFilter === "waiting" ? "WAITING"
-      : activeFilter === "ai" ? "AI_ACTIVE"
-        : activeFilter === "resolved" ? "RESOLVED" : "ATTENDED";
+    const view = activeFilter === "agent" ? "AGENT"
+      : activeFilter === "waiting" ? "WAITING"
+        : activeFilter === "resolved" ? "RESOLVED" : "ALL";
     const cacheKey = `${view}|${conversationSearch}|${selectedTagFilterId ?? ""}`;
     const cached = conversationCacheRef.current[cacheKey];
     const cachedQueueCount = cached
       ? view === "WAITING" ? cached.counts.waiting
-        : view === "AI_ACTIVE" ? cached.counts.aiAttending
+          : view === "AGENT" ? cached.counts.agent
           : view === "RESOLVED" ? cached.counts.resolved
-            : cached.counts.attended
+            : cached.counts.all
       : 0;
     const cacheIsConsistent = Boolean(cached && cached.totalElements === cachedQueueCount);
     if (reset && !options?.force && cached && cacheIsConsistent) {
@@ -2378,9 +2113,9 @@ export default function ChatPage() {
   }, [activeFilter, conversationSearch, selectedTagFilterId]);
 
   const refreshConversationCounts = useCallback(async () => {
-    const view = activeFilter === "waiting" ? "WAITING"
-      : activeFilter === "ai" ? "AI_ACTIVE"
-        : activeFilter === "resolved" ? "RESOLVED" : "ATTENDED";
+    const view = activeFilter === "agent" ? "AGENT"
+      : activeFilter === "waiting" ? "WAITING"
+        : activeFilter === "resolved" ? "RESOLVED" : "ALL";
     const params = new URLSearchParams({ view, page: "0", size: "1" });
     if (conversationSearch) params.set("q", conversationSearch);
     if (selectedTagFilterId) params.set("tagId", selectedTagFilterId);
@@ -2532,26 +2267,6 @@ export default function ChatPage() {
     }
     setIsActionMenuOpen(false);
     setReplyTarget(null);
-    aiRequestRef.current += 1;
-    aiPanelConversationRef.current = null;
-    aiPendingJobRef.current = null;
-    aiDraftRunIdRef.current = null;
-    aiLastRunsRefreshKeyRef.current = null;
-    setActiveAiState(null);
-    setActiveAiMemory(null);
-    setActiveAiAttention(null);
-    setAiDraftText("");
-    setAiError("");
-    setIsAiPanelOpen(false);
-    setIsAiProcessing(false);
-    if (aiFallbackTimerRef.current != null) {
-      window.clearTimeout(aiFallbackTimerRef.current);
-      aiFallbackTimerRef.current = null;
-    }
-    if (aiRunsRefreshTimerRef.current != null) {
-      window.clearTimeout(aiRunsRefreshTimerRef.current);
-      aiRunsRefreshTimerRef.current = null;
-    }
     setActiveConversationId(conversationId);
     activeConversationIdRef.current = conversationId;
     setChatError("");
@@ -2675,25 +2390,6 @@ export default function ChatPage() {
       setConversations((current) =>
         current.map((conversation) => conversation.id === conversationId ? accepted : conversation),
       );
-      if (activeConversationIdRef.current === conversationId) {
-        setActiveAiMemory((current) => current ? {
-          ...current,
-          attentionMode: "HUMANA",
-          attentionState: "HUMANA",
-        } : current);
-        setActiveAiAttention((current) => current ? {
-          ...current,
-          automaticAvailable: false,
-          blockedReason: "Atencion humana activa",
-          memory: {
-            ...current.memory,
-            attentionMode: "HUMANA",
-            attentionState: "HUMANA",
-          },
-        } : current);
-        aiPanelConversationRef.current = null;
-        setIsAiPanelOpen(false);
-      }
       setActiveFilter("all");
       await loadMessages(conversationId);
       toast.success("Chat aceptado. Atencion humana activada");
@@ -2764,13 +2460,13 @@ export default function ChatPage() {
 
   const filteredConversations = conversations;
 
-  const changeFilter = (filter: "all" | "ai" | "waiting" | "resolved") => {
+  const changeFilter = (filter: ConversationFilter) => {
     setActiveFilter(filter);
     if (activeConversationId) {
       const activeConversation = conversations.find((conversation) => conversation.id === activeConversationId);
-      const willBeVisible = (filter === "all" && activeConversation?.attentionQueue === "HUMAN_ACTIVE")
-        || (filter === "ai" && activeConversation?.attentionQueue === "AI_ACTIVE")
-        || (filter === "waiting" && ["ADVISOR_REQUIRED", "PAYMENT_VERIFICATION"].includes(activeConversation?.attentionQueue ?? ""))
+      const willBeVisible = filter === "all"
+        || (filter === "agent" && activeConversation?.attentionQueue === "AGENT_ACTIVE")
+        || (filter === "waiting" && activeConversation?.attentionQueue === "ADVISOR_REQUIRED")
         || (filter === "resolved" && activeConversation?.attentionQueue === "RESOLVED");
       if (!willBeVisible) {
         allMessagesRef.current = { ...allMessagesRef.current, [activeConversationId]: messages };
@@ -2797,112 +2493,6 @@ export default function ChatPage() {
     return () => window.clearTimeout(timeoutId);
   }, [conversationSearchInput]);
 
-  const storeAiCache = useCallback((conversationId: string, value: AiRunsResponse) => {
-    aiCacheRef.current = { ...aiCacheRef.current, [conversationId]: value };
-    aiCacheLruRef.current = [conversationId, ...aiCacheLruRef.current.filter((id) => id !== conversationId)];
-    while (aiCacheLruRef.current.length > MESSAGE_CACHE_LIMIT) {
-      const expiredId = aiCacheLruRef.current.pop();
-      if (expiredId) delete aiCacheRef.current[expiredId];
-    }
-  }, []);
-
-  const applyAiState = useCallback((conversationId: string, value: AiRunsResponse) => {
-    storeAiCache(conversationId, value);
-    if (activeConversationIdRef.current !== conversationId) return;
-    setActiveAiState(value);
-    // SKIPPED runs are audit records, not drafts. Treating one as an active
-    // draft opens an empty editor and prevents a new manual generation.
-    const latestUnreviewed = value.content.find((run) => !run.feedback) ?? null;
-    const latest = latestUnreviewed?.outcome === "SKIPPED" ? null : latestUnreviewed;
-    const presentCurrentFailure = latest?.outcome === "FAILED"
-      && aiFailureEventJobsRef.current.delete(latest.idJob);
-    if (latest?.outcome === "FAILED" && presentCurrentFailure) {
-      setIsAiProcessing(false);
-      setIsAiPanelOpen(true);
-      toast.error(latest.reason || "No se pudo generar la respuesta de IA Kiments", {
-        id: `ai-job-failed-${latest.idJob}`,
-        duration: 10000,
-      });
-    }
-    if (latest && aiDraftRunIdRef.current !== latest.idRun) {
-      aiDraftRunIdRef.current = latest.idRun;
-      setAiDraftText(latest.draft ?? "");
-      const requiresAdvisor = latest.outcome !== "FAILED" && (latest.requiresHuman || latest.outcome === "HUMAN_REQUIRED");
-      if (requiresAdvisor) {
-        aiPanelConversationRef.current = null;
-        setIsAiPanelOpen(false);
-      } else if (latest.outcome === "FAILED" && presentCurrentFailure) {
-        setIsAiPanelOpen(true);
-      }
-    }
-  }, [storeAiCache]);
-
-  const loadAiRuns = useCallback(async (conversationId: string, force = false) => {
-    if (!force && aiCacheRef.current[conversationId]) {
-      applyAiState(conversationId, aiCacheRef.current[conversationId]);
-      return aiCacheRef.current[conversationId];
-    }
-    const requestId = ++aiRequestRef.current;
-    const response = await authFetch(`/api/crm/whatsapp/conversations/${conversationId}/ai/runs`, {
-      cache: "no-store",
-    });
-    if (!response.ok) {
-      throw new Error(await readApiMessage(response, "No se pudo cargar el copiloto"));
-    }
-    const data = (await response.json()) as AiRunsResponse;
-    if (requestId !== aiRequestRef.current && activeConversationIdRef.current === conversationId) return data;
-    applyAiState(conversationId, data);
-    return data;
-  }, [applyAiState]);
-
-  const activeAiConversation = conversations.find(
-    (conversation) => conversation.id === activeConversationId,
-  ) ?? null;
-
-  useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
-      aiRequestRef.current += 1;
-      setAiError("");
-      setIsAiProcessing(false);
-      setIsAiSubmitting(false);
-      setIsAiPanelOpen(false);
-      aiPanelConversationRef.current = null;
-      aiDraftRunIdRef.current = null;
-      if (aiFallbackTimerRef.current != null) {
-        window.clearTimeout(aiFallbackTimerRef.current);
-        aiFallbackTimerRef.current = null;
-      }
-      aiPendingJobRef.current = null;
-      if (!activeConversationId || activeAiConversation?.status === "RESUELTO") {
-        setActiveAiState(null);
-        setAiDraftText("");
-        return;
-      }
-      const cached = aiCacheRef.current[activeConversationId];
-      if (cached) applyAiState(activeConversationId, cached);
-      void loadAiRuns(activeConversationId, !cached).catch((error) => {
-        if (activeConversationIdRef.current === activeConversationId) {
-          setAiError(error instanceof Error ? error.message : "No se pudo cargar el copiloto");
-        }
-      });
-    }, 0);
-    return () => window.clearTimeout(timeoutId);
-  }, [activeAiConversation?.assignedUserId, activeAiConversation?.status, activeConversationId, applyAiState, loadAiRuns]);
-
-  useEffect(() => {
-    if (!activeConversationId || activeAiConversation?.status === "RESUELTO") return;
-    const revalidateGlobalAiMode = () => {
-      if (document.visibilityState !== "visible") return;
-      void loadAiRuns(activeConversationId, true).catch(() => undefined);
-    };
-    window.addEventListener("focus", revalidateGlobalAiMode);
-    document.addEventListener("visibilitychange", revalidateGlobalAiMode);
-    return () => {
-      window.removeEventListener("focus", revalidateGlobalAiMode);
-      document.removeEventListener("visibilitychange", revalidateGlobalAiMode);
-    };
-  }, [activeAiConversation?.status, activeConversationId, loadAiRuns]);
-
   const applyRealtimeEvent = useCallback((event: CrmRealtimeEvent) => {
     if (event.type === "whatsapp.connection.updated" && event.connection) {
       setWhatsappConnection(event.connection);
@@ -2912,139 +2502,23 @@ export default function ChatPage() {
       window.dispatchEvent(new CustomEvent("crm-payment-event", { detail: event }));
       return;
     }
-    if (event.type.startsWith("ai.")) {
-      if (event.type.startsWith("ai.sale_draft.")) {
-        window.dispatchEvent(new CustomEvent("crm-ai-sale-draft-event", { detail: event }));
-        return;
-      }
-      const conversationId = String(event.conversationId);
-      if (event.type === "ai.memory.updated") {
-        if (activeConversationIdRef.current === conversationId && event.memory) {
-          setActiveAiMemory(event.memory);
-          setActiveAiAttention((current) => current ? { ...current, memory: event.memory as AiMemoryResponse } : current);
-        }
-        return;
-      }
-      if (event.type === "ai.auto_reply.sent") return;
-      if (event.type === "ai.limit.reached") {
-        if (activeConversationIdRef.current === conversationId) {
-          const reason = event.reason || "Se alcanzo el limite maximo de respuestas automaticas para este chat";
-          setActiveAiAttention((current) => current ? {
-            ...current,
-            automaticAvailable: false,
-            blockedReason: reason,
-          } : current);
-          toast.warning("IA Kiments alcanzo el maximo de respuestas automaticas", {
-            description: "Aumenta el limite desde IA Kiments en Conexiones.",
-            id: `ai-limit-${conversationId}`,
-          });
-        }
-        return;
-      }
-      if (event.type === "ai.handoff.required") {
-        const waitingReason = event.waitingReason ?? "ADVISOR_REQUIRED";
-        const waitingDetail = event.reason?.trim() || null;
-        if (activeConversationIdRef.current === conversationId) {
-          aiPanelConversationRef.current = null;
-          setIsAiPanelOpen(false);
-          setAiDraftText("");
-          conversationCacheRef.current = {};
-          setActiveFilter("waiting");
-        }
-        setConversations((current) => {
-          const next = current.map((conversation) => conversation.id === conversationId
-            ? {
-                ...conversation,
-                status: "ESPERA" as const,
-                aiAttentionMode: "HUMANA" as const,
-                attentionQueue: "ADVISOR_REQUIRED" as const,
-                waitingReason,
-                waitingDetail,
-              }
-            : conversation);
-          conversationsRef.current = next;
-          return next;
-        });
-        for (const [cacheKey, entry] of Object.entries(conversationCacheRef.current)) {
-          conversationCacheRef.current[cacheKey] = {
-            ...entry,
-            items: entry.items.map((conversation) => conversation.id === conversationId
-              ? {
-                  ...conversation,
-                  status: "ESPERA" as const,
-                  aiAttentionMode: "HUMANA" as const,
-                  attentionQueue: "ADVISOR_REQUIRED" as const,
-                  waitingReason,
-                  waitingDetail,
-                }
-              : conversation),
-          };
-        }
-        if (activeConversationIdRef.current === conversationId) {
-          setActiveAiMemory((current) => current ? { ...current, attentionMode: "HUMANA", attentionState: "HUMANA" } : current);
-          setActiveAiAttention((current) => current ? {
-            ...current,
-            automaticAvailable: false,
-            blockedReason: event.reason || "La consulta requiere un asesor",
-            memory: { ...current.memory, attentionMode: "HUMANA", attentionState: "HUMANA" },
-          } : current);
-        }
-      }
-      if (event.type === "ai.processing") {
-        if (activeConversationIdRef.current === conversationId
-          && aiPanelConversationRef.current === conversationId) {
-          setIsAiProcessing(true);
-          setIsAiPanelOpen(true);
-          setAiError("");
-        }
-      } else if (
-         event.type === "ai.draft.created"
-         || event.type === "ai.processing.completed"
-         || event.type === "ai.failed"
-         || event.type === "ai.retry.scheduled"
-         || event.type === "ai.handoff.required"
-      ) {
-        if ((event.type === "ai.failed" || event.type === "ai.retry.scheduled") && event.jobId != null) {
-          aiFailureEventJobsRef.current.add(Number(event.jobId));
-        }
-        const terminalId = event.runId != null ? `run-${event.runId}` : event.jobId != null ? `job-${event.jobId}` : null;
-        const refreshKey = terminalId ? `${conversationId}:${terminalId}` : null;
-        if (refreshKey && aiLastRunsRefreshKeyRef.current === refreshKey) return;
-        if (refreshKey) aiLastRunsRefreshKeyRef.current = refreshKey;
-        delete aiCacheRef.current[conversationId];
-        if (activeConversationIdRef.current === conversationId) {
-          aiPendingJobRef.current = null;
-          if (aiFallbackTimerRef.current != null) {
-            window.clearTimeout(aiFallbackTimerRef.current);
-            aiFallbackTimerRef.current = null;
-          }
-          setIsAiProcessing(false);
-          if (aiRunsRefreshTimerRef.current == null) {
-            aiRunsRefreshTimerRef.current = window.setTimeout(() => {
-              aiRunsRefreshTimerRef.current = null;
-              if (activeConversationIdRef.current !== conversationId) return;
-              void loadAiRuns(conversationId, true).catch((error) => {
-                setAiError(error instanceof Error ? error.message : "No se pudo actualizar el borrador");
-                setIsAiPanelOpen(true);
-              });
-            }, 250);
-          }
-        }
-      }
-      return;
-    }
     if (!event.conversation) return;
+    window.dispatchEvent(new CustomEvent("crm-agent-event", { detail: event }));
     const mappedConversation = mapConversation(event.conversation);
     refreshConversationCountsRef.current();
-    const expectedQueue: AttentionQueue = activeFilter === "waiting" ? "ADVISOR_REQUIRED"
-      : activeFilter === "ai" ? "AI_ACTIVE"
+    const expectedQueue: AttentionQueue = activeFilter === "agent" ? "AGENT_ACTIVE"
+      : activeFilter === "waiting" ? "ADVISOR_REQUIRED"
         : activeFilter === "resolved" ? "RESOLVED" : "HUMAN_ACTIVE";
     const accessible = isAdmin
       || mappedConversation.assignedUserId === user?.idUsuario
       || (mappedConversation.status === "ESPERA" && !mappedConversation.assignedUserId);
-    const matchesActiveList = accessible && (activeFilter === "waiting"
-      ? ["ADVISOR_REQUIRED", "PAYMENT_VERIFICATION"].includes(mappedConversation.attentionQueue)
-      : mappedConversation.attentionQueue === expectedQueue);
+    const matchesActiveList = accessible && (activeFilter === "all"
+      ? true
+      : activeFilter === "agent"
+        ? mappedConversation.attentionQueue === "AGENT_ACTIVE"
+      : activeFilter === "waiting"
+        ? mappedConversation.attentionQueue === "ADVISOR_REQUIRED"
+        : mappedConversation.attentionQueue === expectedQueue);
 
     setConversations((current) => {
       const exists = current.some((item) => item.id === mappedConversation.id);
@@ -3062,9 +2536,13 @@ export default function ChatPage() {
       let items = entry.items.filter((item) => item.id !== mappedConversation.id);
       if (
         event.type !== "conversation.removed"
-        && (cacheView === "WAITING"
-          ? ["ADVISOR_REQUIRED", "PAYMENT_VERIFICATION"].includes(mappedConversation.attentionQueue)
-          : mappedConversation.attentionQueue === ({ ATTENDED: "HUMAN_ACTIVE", AI_ACTIVE: "AI_ACTIVE", RESOLVED: "RESOLVED" } as Record<string, AttentionQueue>)[cacheView])
+        && (cacheView === "ALL"
+          ? true
+          : cacheView === "AGENT"
+            ? mappedConversation.attentionQueue === "AGENT_ACTIVE"
+          : cacheView === "WAITING"
+            ? mappedConversation.attentionQueue === "ADVISOR_REQUIRED"
+            : mappedConversation.attentionQueue === ({ ATTENDED: "HUMAN_ACTIVE", RESOLVED: "RESOLVED" } as Record<string, AttentionQueue>)[cacheView])
         && (exists || (!cacheSearch && !cacheTag))
       ) {
         items = [mappedConversation, ...items].slice(0, Math.max(CONVERSATION_PAGE_SIZE, entry.items.length));
@@ -3101,7 +2579,7 @@ export default function ChatPage() {
     if (activeConversationIdRef.current === conversationId) {
       setMessages(cachedMessages);
     }
-  }, [activeFilter, conversationSearch, isAdmin, loadAiRuns, selectedTagFilterId, storeMessageCache, user?.idUsuario]);
+  }, [activeFilter, conversationSearch, isAdmin, selectedTagFilterId, storeMessageCache, user?.idUsuario]);
 
   useEffect(() => {
     realtimeEventHandlerRef.current = applyRealtimeEvent;
@@ -3115,11 +2593,8 @@ export default function ChatPage() {
       if (conversationId && newestId) {
         void loadMessages(conversationId, { afterId: newestId, preserveLocal: true }).catch(() => undefined);
       }
-      if (conversationId && aiCacheRef.current[conversationId]?.canGenerate) {
-        void loadAiRuns(conversationId, true).catch(() => undefined);
-      }
     };
-  }, [loadAiRuns, loadConversations, loadMessages]);
+  }, [loadConversations, loadMessages]);
 
   useEffect(() => {
     let disposed = false;
@@ -3237,9 +2712,6 @@ export default function ChatPage() {
   useEffect(() => () => {
     conversationAbortRef.current?.abort();
     messageAbortRef.current?.abort();
-    if (aiFallbackTimerRef.current != null) window.clearTimeout(aiFallbackTimerRef.current);
-    if (aiRunsRefreshTimerRef.current != null) window.clearTimeout(aiRunsRefreshTimerRef.current);
-    aiPendingJobRef.current = null;
   }, []);
 
   useEffect(() => {
@@ -3257,163 +2729,18 @@ export default function ChatPage() {
 
   const activeConversation = conversations.find((conversation) => conversation.id === activeConversationId) ?? null;
   const activeConversationTags = activeConversation?.tags ?? [];
-  const allConversationCount = conversationCounts.attended;
+  const allConversationCount = conversationCounts.all;
+  const agentConversationCount = conversationCounts.agent;
   const waitingCount = conversationCounts.waiting;
   const isSharedUnassignedActive = Boolean(
     activeConversation
     && !activeConversation.assignedUserId
-    && ["AI_ACTIVE", "ADVISOR_REQUIRED", "PAYMENT_VERIFICATION"].includes(activeConversation.attentionQueue),
+    && activeConversation.attentionQueue === "ADVISOR_REQUIRED",
   );
   const isUnassignedWaitingActive = isSharedUnassignedActive;
-  const canOperateActiveConversation = Boolean(activeConversationId) && !isUnassignedWaitingActive;
-  const activeAttentionMode: AiAttentionMode = activeAiMemory?.attentionMode
-    ?? activeConversation?.aiAttentionMode
-    ?? (activeConversation?.assignedUserId ? "HUMANA" : "AUTOMATICA");
-  const globalAutomaticEnabled = !activeAiState || activeAiState.mode === "AUTOMATICA";
-  const effectiveAttentionMode: AiAttentionMode = globalAutomaticEnabled ? activeAttentionMode : "HUMANA";
-  const aiAttendingActive = effectiveAttentionMode === "AUTOMATICA";
-  const globalAiDisabledReason = globalAutomaticEnabled
-    ? ""
-    : activeAiState?.mode === "SUGERENCIAS"
-      ? "Conexion solo para sugerencias: responde un asesor"
-      : "IA Kiments desactivada";
-  const attentionAssignedToOther = Boolean(
-    activeConversation?.assignedUserId
-    && activeConversation.assignedUserId !== user?.idUsuario,
-  );
-  const canChangeAiAttention = Boolean(activeConversationId)
-    && activeConversation?.status !== "RESUELTO"
-    && (isAdmin || !attentionAssignedToOther);
-  const automaticResponseLimitReached = activeAttentionMode === "AUTOMATICA"
-    && Boolean(activeAiAttention && !activeAiAttention.automaticAvailable)
-    && (activeAiAttention?.blockedReason ?? "").toLowerCase().includes("limite maximo de respuestas automaticas");
-
-  useEffect(() => {
-    if (!activeConversationId) {
-      const timeoutId = window.setTimeout(() => {
-        setActiveAiMemory(null);
-        setActiveAiAttention(null);
-      }, 0);
-      return () => window.clearTimeout(timeoutId);
-    }
-    const controller = new AbortController();
-    void authFetch(`/api/crm/whatsapp/conversations/${activeConversationId}/ai/attention`, {
-      cache: "no-store",
-      signal: controller.signal,
-    }).then(async (response) => {
-      if (response.ok) {
-        const data = (await response.json()) as AiAttentionResponse;
-        setActiveAiAttention(data);
-        setActiveAiMemory(data.memory);
-      }
-    }).catch(() => undefined);
-    return () => controller.abort();
-  }, [activeConversationId]);
-
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Contexto IA Kiments oculto temporalmente
-  const clearAiMemory = useCallback(async () => {
-    if (!activeConversationId) return;
-    const response = await authFetch(`/api/crm/whatsapp/conversations/${activeConversationId}/ai/memory`, {
-      method: "DELETE",
-    });
-    if (!response.ok) {
-      toast.error(await readApiMessage(response, "No se pudo limpiar el contexto de IA Kiments"));
-      return;
-    }
-    const memory = (await response.json()) as AiMemoryResponse;
-    setActiveAiMemory(memory);
-    setActiveAiAttention((current) => current ? { ...current, memory } : current);
-    toast.success("Contexto de IA Kiments limpiado");
-  }, [activeConversationId]);
-
-  const changeAiAttention = useCallback(async (mode: AiAttentionMode) => {
-    if (!activeConversationId || isChangingAiAttention) return;
-    if (mode === "AUTOMATICA" && activeAiState?.mode && activeAiState.mode !== "AUTOMATICA") return;
-    const currentMode = activeAiMemory?.attentionMode ?? activeConversation?.aiAttentionMode;
-    const alreadyAssignedToCurrentUser = activeConversation?.assignedUserId === user?.idUsuario;
-    if (currentMode === mode
-      && ((mode === "AUTOMATICA" && activeAiAttention?.automaticAvailable)
-        || (mode === "HUMANA" && alreadyAssignedToCurrentUser))) return;
-    const conversationId = activeConversationId;
-    setIsChangingAiAttention(true);
-    try {
-      const response = await authFetch(`/api/crm/whatsapp/conversations/${conversationId}/ai/attention`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode }),
-      });
-      if (!response.ok) {
-        throw new Error(await readApiMessage(response, "No se pudo cambiar el modo de atencion"));
-      }
-      const data = (await response.json()) as AiAttentionResponse;
-      const mapped = mapConversation(data.conversation);
-      setActiveAiAttention(data);
-      setActiveAiMemory(data.memory);
-
-      const destinationView = mapped.attentionQueue === "HUMAN_ACTIVE"
-        ? "ATTENDED"
-        : mapped.attentionQueue === "AI_ACTIVE"
-          ? "AI_ACTIVE"
-          : mapped.attentionQueue === "RESOLVED"
-            ? "RESOLVED"
-            : "WAITING";
-      const destinationFilter = destinationView === "ATTENDED"
-        ? "all"
-        : destinationView === "AI_ACTIVE"
-          ? "ai"
-          : destinationView === "RESOLVED"
-            ? "resolved"
-            : "waiting";
-
-      for (const [cacheKey, entry] of Object.entries(conversationCacheRef.current)) {
-        const [cacheView, cacheSearch, cacheTag] = cacheKey.split("|");
-        const existed = entry.items.some((item) => item.id === mapped.id);
-        let items = entry.items.filter((item) => item.id !== mapped.id);
-        if (cacheView === destinationView && (existed || (!cacheSearch && !cacheTag))) {
-          items = [mapped, ...items].slice(0, Math.max(CONVERSATION_PAGE_SIZE, entry.items.length));
-        }
-        const totalElements = existed && cacheView !== destinationView
-          ? Math.max(0, entry.totalElements - 1)
-          : !existed && cacheView === destinationView
-            ? entry.totalElements + 1
-            : entry.totalElements;
-        conversationCacheRef.current[cacheKey] = { ...entry, items, totalElements };
-      }
-
-      const destinationKey = `${destinationView}|${conversationSearch}|${selectedTagFilterId ?? ""}`;
-      const destinationEntry = conversationCacheRef.current[destinationKey];
-      const destinationItems = [
-        mapped,
-        ...(destinationEntry?.items ?? []).filter((item) => item.id !== mapped.id),
-      ];
-      conversationCacheRef.current[destinationKey] = {
-        items: destinationItems,
-        counts: destinationEntry?.counts ?? conversationCounts,
-        totalElements: Math.max(destinationEntry?.totalElements ?? 0, destinationItems.length),
-      };
-      conversationsRef.current = destinationItems;
-      setConversations(destinationItems);
-      setResolvedIds(new Set(destinationItems.filter((item) => item.status === "RESUELTO").map((item) => item.id)));
-      setActiveFilter(destinationFilter);
-      refreshConversationCountsRef.current();
-
-      if (mode === "HUMANA") {
-        await loadMessages(conversationId);
-        aiPanelConversationRef.current = null;
-        setIsAiPanelOpen(false);
-        toast.success("Atencion humana activada");
-      } else {
-        aiPanelConversationRef.current = null;
-        setIsAiPanelOpen(false);
-        setReplyTarget(null);
-        toast.success(data.automaticAvailable ? "IA Kiments automatica activada" : "Modo automatico guardado");
-      }
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "No se pudo cambiar el modo de atencion");
-    } finally {
-      setIsChangingAiAttention(false);
-    }
-  }, [activeAiAttention?.automaticAvailable, activeAiMemory?.attentionMode, activeAiState?.mode, activeConversation, activeConversationId, conversationCounts, conversationSearch, isChangingAiAttention, loadMessages, selectedTagFilterId, user?.idUsuario]);
+  const canOperateActiveConversation = Boolean(activeConversationId)
+    && !isUnassignedWaitingActive
+    && activeConversation?.attentionQueue !== "AGENT_ACTIVE";
   const filteredTransferUsers = transferUsers.filter((transferUser) => {
     if (transferUser.id === activeConversation?.assignedUserId) {
       return false;
@@ -3535,102 +2862,6 @@ export default function ChatPage() {
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const toggleSidebar = () => setIsSidebarOpen((prev) => !prev);
-
-  const loadActivePaymentReview = useCallback(async (conversationId: string) => {
-    try {
-      const response = await authFetch(
-        `/api/crm/whatsapp/conversations/${conversationId}/payment-requests/active`,
-        { cache: "no-store" },
-      );
-      if (!response.ok) {
-        setActivePaymentReview(null);
-        return;
-      }
-      const data = (await response.json()) as ActivePaymentReview | null;
-      setActivePaymentReview(
-        data?.status === "READY_FOR_SALE"
-          && data.evidenceStatus === "ACEPTABLE"
-          && !data.advisorAccepted
-          && data.evidenceId
-          && data.evidenceMessageId
-          ? data
-          : null,
-      );
-    } catch {
-      setActivePaymentReview(null);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!activeConversationId) {
-      const timeoutId = window.setTimeout(() => setActivePaymentReview(null), 0);
-      return () => window.clearTimeout(timeoutId);
-    }
-    const timeoutId = window.setTimeout(() => void loadActivePaymentReview(activeConversationId), 0);
-    const refresh = (event: Event) => {
-      const detail = (event as CustomEvent<{ conversationId?: number }>).detail;
-      if (String(detail?.conversationId ?? "") === activeConversationId) {
-        void loadActivePaymentReview(activeConversationId);
-      }
-    };
-    window.addEventListener("crm-payment-event", refresh);
-    return () => {
-      window.clearTimeout(timeoutId);
-      window.removeEventListener("crm-payment-event", refresh);
-    };
-  }, [activeConversationId, loadActivePaymentReview]);
-
-  const decidePayment = useCallback(async (action: "ACCEPT" | "REJECT") => {
-    if (!activePaymentReview || paymentDecisionLoading) return;
-    setPaymentDecisionLoading(true);
-    try {
-      const response = await authFetch(
-        `/api/crm/whatsapp/payment-evidences/${activePaymentReview.evidenceId}/decision`,
-        {
-          method: "POST",
-          body: JSON.stringify({ action, confirmedExternal: false, note: null }),
-        },
-      );
-      if (!response.ok) {
-        const data = await response.json().catch(() => null);
-        throw new Error(data?.message || "No se pudo actualizar el pago");
-      }
-      const data = (await response.json()) as PaymentDecisionResponse;
-      if (data.conversation) {
-        realtimeEventHandlerRef.current({
-          type: "conversation.updated",
-          conversationId: data.conversation.id,
-          conversation: data.conversation,
-          message: null,
-        });
-      }
-      setPaymentReviewOpen(false);
-      setActiveFilter("all");
-      if (action === "ACCEPT") {
-        setActivePaymentReview(null);
-        setIsSidebarOpen(true);
-        window.setTimeout(() => {
-          window.dispatchEvent(new CustomEvent("crm-open-payment-sale", {
-            detail: { conversationId: Number(activeConversationId) },
-          }));
-        }, 0);
-        toast.success("Pago aceptado. Completa la venta en Venta Rápida");
-      } else {
-        setActivePaymentReview(null);
-        window.dispatchEvent(new CustomEvent("crm-ai-sale-draft-event", {
-          detail: { conversationId: Number(activeConversationId) },
-        }));
-        window.dispatchEvent(new CustomEvent("crm-payment-event", {
-          detail: { conversationId: Number(activeConversationId) },
-        }));
-        toast.success("Pago rechazado y pedido cancelado");
-      }
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "No se pudo actualizar el pago");
-    } finally {
-      setPaymentDecisionLoading(false);
-    }
-  }, [activeConversationId, activePaymentReview, paymentDecisionLoading]);
 
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [activeMobileEmojiCategory, setActiveMobileEmojiCategory] =
@@ -4365,184 +3596,6 @@ export default function ChatPage() {
   const handleDraftInput = (event: FormEvent<HTMLTextAreaElement>) => {
     setMessageDraft(event.currentTarget.value);
     resizeMessageTextarea(event.currentTarget);
-  };
-
-  const latestIncomingMessageId = [...messages]
-    .reverse()
-    .find((message) => message.type === "incoming" || message.type === "incoming-file" || message.type === "incoming-audio")
-    ?.id ?? null;
-  const latestUnreviewedAiRun = activeAiState?.content.find((run) => (
-    !run.feedback
-    && (!latestIncomingMessageId || String(run.idMessage) === latestIncomingMessageId)
-  )) ?? null;
-  const activeAiRun = latestUnreviewedAiRun?.outcome === "SKIPPED" ? null : latestUnreviewedAiRun;
-
-  const updateAiFeedback = (decision: AiDecisionResponse) => {
-    if (!activeConversationId) return;
-    const current = aiCacheRef.current[activeConversationId] ?? activeAiState;
-    if (!current) return;
-    const next: AiRunsResponse = {
-      ...current,
-      content: current.content.map((run) => run.idRun === decision.idRun ? {
-        ...run,
-        feedback: {
-          decision: decision.decision,
-          finalText: decision.finalText,
-          similarityPercentage: decision.similarityPercentage,
-          changedCharacters: decision.changedCharacters,
-          discardReason: decision.discardReason,
-          sendStatus: decision.sendStatus,
-          reviewerId: decision.reviewerId,
-          reviewedAt: decision.reviewedAt,
-          outgoingMessageId: decision.message?.id ?? null,
-        },
-      } : run),
-    };
-    storeAiCache(activeConversationId, next);
-    setActiveAiState(next);
-  };
-
-  const appendAiSentMessage = (conversationId: string, response: CrmMessageResponse) => {
-    const mapped = mapMessage(response);
-    const existing = allMessagesRef.current[conversationId] ?? [];
-    const next = Array.from(new Map([...existing, mapped].map((message) => [message.id, message])).values());
-    const previousMeta = messageCacheMetaRef.current[conversationId];
-    const stored = storeMessageCache(conversationId, next, {
-      oldestId: previousMeta?.oldestId ?? response.id,
-      newestId: Math.max(previousMeta?.newestId ?? response.id, response.id),
-      hasMoreBefore: previousMeta?.hasMoreBefore ?? false,
-    });
-    if (activeConversationIdRef.current === conversationId) setMessages(stored);
-  };
-
-  const requestAiDraft = async (regenerate: boolean) => {
-    if (!activeConversationId || isAiProcessing || isAiSubmitting) return;
-    const conversationId = activeConversationId;
-    aiPanelConversationRef.current = conversationId;
-    setAiError("");
-    setIsAiPanelOpen(true);
-    setIsAiProcessing(true);
-    const previousRunId = activeAiState?.content.reduce(
-      (latest, run) => Math.max(latest, run.idRun),
-      0,
-    ) ?? 0;
-    try {
-      const response = await authFetch(`/api/crm/whatsapp/conversations/${conversationId}/ai/drafts`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ regenerate }),
-      });
-      if (!response.ok) {
-        throw new Error(await readApiMessage(response, "No se pudo generar la respuesta"));
-      }
-      const job = (await response.json()) as { idJob: number };
-      aiPendingJobRef.current = job.idJob;
-      if (aiFallbackTimerRef.current != null) window.clearTimeout(aiFallbackTimerRef.current);
-
-      const refreshUntilCompleted = (attempt: number) => {
-        aiFallbackTimerRef.current = window.setTimeout(async () => {
-          if (activeConversationIdRef.current !== conversationId || aiPendingJobRef.current !== job.idJob) return;
-          if (realtimeStatusRef.current === "live") {
-            aiFallbackTimerRef.current = null;
-            return;
-          }
-          try {
-            const runs = await loadAiRuns(conversationId, true);
-            const completed = runs.content.some((run) => {
-              if (run.idJob !== job.idJob || run.idRun <= previousRunId) return false;
-              if (!run.jobStatus) return run.outcome !== "FAILED";
-              return run.jobStatus !== "PENDING" && run.jobStatus !== "PROCESSING";
-            });
-            if (completed) {
-              aiPendingJobRef.current = null;
-              aiFallbackTimerRef.current = null;
-              setIsAiProcessing(false);
-              return;
-            }
-          } catch {
-            // El SSE puede completar el trabajo aunque una resincronizacion puntual falle.
-          }
-          if (attempt >= 11) {
-            aiPendingJobRef.current = null;
-            aiFallbackTimerRef.current = null;
-            setIsAiProcessing(false);
-            setAiError("La respuesta esta tardando demasiado. Intenta nuevamente.");
-            return;
-          }
-          refreshUntilCompleted(attempt + 1);
-        }, 5000);
-      };
-      if (realtimeStatusRef.current !== "live") refreshUntilCompleted(0);
-    } catch (error) {
-      aiPendingJobRef.current = null;
-      setIsAiProcessing(false);
-      setAiError(error instanceof Error ? error.message : "No se pudo generar la respuesta");
-    }
-  };
-
-  const decideAiDraft = async (
-    action: "SEND" | "DISCARD",
-    options?: { reason?: string; keepOpen?: boolean },
-  ) => {
-    if (!activeConversationId || !activeAiRun || isAiSubmitting) return null;
-    const conversationId = activeConversationId;
-    setIsAiSubmitting(true);
-    setAiError("");
-    try {
-      const response = await authFetch(
-        `/api/crm/whatsapp/conversations/${conversationId}/ai/runs/${activeAiRun.idRun}/decision`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action,
-            text: action === "SEND" ? aiDraftText : null,
-            discardReason: options?.reason ?? null,
-          }),
-        },
-      );
-      if (!response.ok) {
-        throw new Error(await readApiMessage(response, action === "SEND" ? "No se pudo enviar la respuesta" : "No se pudo descartar"));
-      }
-      const result = (await response.json()) as AiDecisionResponse;
-      updateAiFeedback(result);
-      if (result.message) appendAiSentMessage(conversationId, result.message);
-      if (!options?.keepOpen) {
-        aiPanelConversationRef.current = null;
-        setIsAiPanelOpen(false);
-      }
-      if (action === "SEND") toast.success(result.decision === "EDITED" ? "Respuesta editada y enviada" : "Respuesta aprobada y enviada");
-      return result;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "No se pudo procesar el borrador";
-      setAiError(message);
-      setIsAiPanelOpen(true);
-      toast.error(message);
-      return null;
-    } finally {
-      setIsAiSubmitting(false);
-    }
-  };
-
-  const handleRegenerateAi = async () => {
-    if (activeAiRun?.outcome === "DRAFT_READY") {
-      const discarded = await decideAiDraft("DISCARD", { reason: "REGENERATED", keepOpen: true });
-      if (!discarded) return;
-    }
-    await requestAiDraft(true);
-  };
-
-  const handleOpenAi = () => {
-    if (!activeConversationId) return;
-    aiPanelConversationRef.current = activeConversationId;
-    if (activeAiRun) {
-      setAiDraftText(activeAiRun.draft ?? "");
-      aiDraftRunIdRef.current = activeAiRun.idRun;
-      setAiError("");
-      setIsAiPanelOpen(true);
-      return;
-    }
-    void requestAiDraft(Boolean(activeAiState?.content.length));
   };
 
   const handleMobileInputFocus = () => {
@@ -5387,41 +4440,95 @@ export default function ChatPage() {
             </div>
           )}
 
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <button type="button" onClick={() => changeFilter("all")}>
-              <Badge variant="outline" className={`px-3 py-1 text-sm font-semibold ${activeFilter === "all" ? "border-transparent bg-muted text-foreground" : "text-muted-foreground"}`}>
-                Todos los chats
-                <span className="ml-2 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-foreground/20 px-1 text-[10px] text-foreground">
+          <div className="mt-3">
+            <div className="grid grid-cols-2 gap-1.5 rounded-2xl border border-border/70 bg-muted/35 p-1.5">
+              <button
+                type="button"
+                aria-pressed={activeFilter === "all"}
+                onClick={() => changeFilter("all")}
+                className={cn(
+                  "group inline-flex min-h-9 items-center gap-2 rounded-xl border px-2.5 text-left text-xs font-semibold transition-all",
+                  activeFilter === "all"
+                    ? "border-border bg-background text-foreground shadow-sm"
+                    : "border-transparent text-muted-foreground hover:bg-background/70 hover:text-foreground",
+                )}
+              >
+                <ChatBubbleLeftRightIcon className="h-4 w-4 shrink-0" />
+                <span className="min-w-0 flex-1 truncate">Todos los chats</span>
+                <span className={cn(
+                  "inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-[10px] font-bold tabular-nums",
+                  activeFilter === "all" ? "bg-foreground text-background" : "bg-background text-muted-foreground",
+                )}>
                   {allConversationCount}
                 </span>
-              </Badge>
-            </button>
-            <button type="button" onClick={() => changeFilter("ai")}>
-              <Badge variant="outline" className={`px-3 py-1 text-sm ${activeFilter === "ai" ? "border-transparent bg-muted text-foreground font-semibold" : "text-muted-foreground"}`}>
-                IA atendiendo
-                <span className="ml-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-foreground/20 px-1 text-[10px] text-foreground">
-                  {conversationCounts.aiAttending}
+              </button>
+
+              <button
+                type="button"
+                aria-pressed={activeFilter === "agent"}
+                onClick={() => changeFilter("agent")}
+                className={cn(
+                  "group inline-flex min-h-9 items-center gap-2 rounded-xl border px-2.5 text-left text-xs font-semibold transition-all",
+                  activeFilter === "agent"
+                    ? "border-sky-200 bg-sky-50 text-sky-800 shadow-sm dark:border-sky-800 dark:bg-sky-950/70 dark:text-sky-200"
+                    : "border-transparent text-muted-foreground hover:bg-background/70 hover:text-foreground",
+                )}
+              >
+                <SparklesIcon className="h-4 w-4 shrink-0" />
+                <span className="min-w-0 flex-1 truncate">IA atendiendo</span>
+                <span className={cn(
+                  "inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-[10px] font-bold tabular-nums",
+                  activeFilter === "agent" ? "bg-sky-600 text-white" : "bg-background text-muted-foreground",
+                )}>
+                  {agentConversationCount}
                 </span>
-              </Badge>
-            </button>
-            <button type="button" onClick={() => changeFilter("waiting")}>
-              <Badge variant="outline" className={`px-3 py-1 text-sm ${activeFilter === "waiting" ? "border-transparent bg-muted text-foreground font-semibold" : "text-muted-foreground"}`}>
-                Espera
-                <span className="ml-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-foreground/20 px-1 text-[10px] text-foreground">
+              </button>
+
+              <button
+                type="button"
+                aria-pressed={activeFilter === "waiting"}
+                onClick={() => changeFilter("waiting")}
+                className={cn(
+                  "group inline-flex min-h-9 items-center gap-2 rounded-xl border px-2.5 text-left text-xs font-semibold transition-all",
+                  activeFilter === "waiting"
+                    ? "border-amber-200 bg-amber-50 text-amber-800 shadow-sm dark:border-amber-800 dark:bg-amber-950/70 dark:text-amber-200"
+                    : "border-transparent text-muted-foreground hover:bg-background/70 hover:text-foreground",
+                )}
+              >
+                <HandRaisedIcon className="h-4 w-4 shrink-0" />
+                <span className="min-w-0 flex-1 truncate">Espera</span>
+                <span className={cn(
+                  "inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-[10px] font-bold tabular-nums",
+                  activeFilter === "waiting" ? "bg-amber-500 text-white" : "bg-background text-muted-foreground",
+                )}>
                   {waitingCount}
                 </span>
-              </Badge>
-            </button>
-            <button type="button" onClick={() => changeFilter("resolved")}>
-              <Badge variant="outline" className={`px-3 py-1 text-sm ${activeFilter === "resolved" ? "border-transparent bg-muted text-foreground font-semibold" : "text-muted-foreground"}`}>
-                Resueltos
-                <span className="ml-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-foreground/20 px-1 text-[10px] text-foreground">
+              </button>
+
+              <button
+                type="button"
+                aria-pressed={activeFilter === "resolved"}
+                onClick={() => changeFilter("resolved")}
+                className={cn(
+                  "group inline-flex min-h-9 items-center gap-2 rounded-xl border px-2.5 text-left text-xs font-semibold transition-all",
+                  activeFilter === "resolved"
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-800 shadow-sm dark:border-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-200"
+                    : "border-transparent text-muted-foreground hover:bg-background/70 hover:text-foreground",
+                )}
+              >
+                <CheckIcon className="h-4 w-4 shrink-0" />
+                <span className="min-w-0 flex-1 truncate">Resueltos</span>
+                <span className={cn(
+                  "inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-[10px] font-bold tabular-nums",
+                  activeFilter === "resolved" ? "bg-emerald-600 text-white" : "bg-background text-muted-foreground",
+                )}>
                   {conversationCounts.resolved}
                 </span>
-              </Badge>
-            </button>
+              </button>
+            </div>
+
             {realtimeStatus !== "live" && (
-              <span className="ml-auto inline-flex items-center gap-1.5 text-[10px] font-medium text-amber-600 dark:text-amber-300">
+              <span className="mt-2 inline-flex items-center gap-1.5 text-[10px] font-medium text-amber-600 dark:text-amber-300">
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
                 Reconectando
               </span>
@@ -5476,7 +4583,9 @@ export default function ChatPage() {
                   conversation={{ ...conversation, active: conversation.id === activeConversationId }}
                   accepting={acceptingConversationId === conversation.id}
                   onAccept={
-                    conversation.status === "ESPERA" && !conversation.assignedUserId
+                    conversation.status === "ESPERA"
+                      && !conversation.assignedUserId
+                      && conversation.attentionQueue === "ADVISOR_REQUIRED"
                       ? () => void handleAcceptCurrent(conversation.id)
                       : undefined
                   }
@@ -5497,7 +4606,7 @@ export default function ChatPage() {
                     disabled={isLoadingMoreConversations}
                     onClick={() => void loadConversations({ append: true }).catch(() => undefined)}
                   >
-                    {isLoadingMoreConversations ? "Cargando..." : "Ver más"}
+                    {isLoadingMoreConversations ? "Cargando..." : "Ver mÃƒÂ¡s"}
                   </Button>
                 </div>
               )}
@@ -5546,46 +4655,6 @@ export default function ChatPage() {
                   {getConversationContactLabel(activeConversation)}: {activeConversation?.phone || "Numero no disponible"}
                 </p>
               </div>
-            </div>
-
-            <div className="order-3 flex w-full flex-col gap-1 md:order-none md:w-auto md:min-w-56">
-              <div className="grid grid-cols-2 rounded-lg border border-border bg-muted/50 p-1">
-                <button
-                  type="button"
-                  onClick={() => { if (globalAutomaticEnabled) void changeAiAttention("AUTOMATICA") }}
-                  disabled={!canChangeAiAttention || isChangingAiAttention || !globalAutomaticEnabled}
-                  aria-label="IA Kiments automatica"
-                  title={globalAutomaticEnabled ? "IA Kiments automatica" : globalAiDisabledReason}
-                  className={cn("flex h-8 items-center justify-center gap-1.5 rounded-md px-2 text-[10px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-50", effectiveAttentionMode === "AUTOMATICA" ? "bg-background text-blue-700 shadow-sm dark:text-blue-300" : "text-muted-foreground hover:text-foreground")}
-                >
-                  <SparklesIcon className="h-3.5 w-3.5" />
-                  <span>IA Kiments</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void changeAiAttention("HUMANA")}
-                  disabled={!canChangeAiAttention || isChangingAiAttention}
-                  aria-label="Atencion humana"
-                  title="Atencion humana"
-                  className={cn("flex h-8 items-center justify-center gap-1.5 rounded-md px-2 text-[10px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-50", effectiveAttentionMode === "HUMANA" ? "bg-background text-emerald-700 shadow-sm dark:text-emerald-300" : "text-muted-foreground hover:text-foreground")}
-                >
-                  <UserIconSolid className="h-3.5 w-3.5" />
-                  <span>Humano</span>
-                </button>
-              </div>
-              {activeConversation?.waitingDetail ? (
-                <p className="max-w-56 whitespace-normal px-1 text-[9px] leading-snug text-amber-700 dark:text-amber-300" title={activeConversation.waitingDetail}>
-                  {activeConversation.waitingDetail}
-                </p>
-              ) : !globalAutomaticEnabled ? (
-                <p className="truncate px-1 text-[9px] text-amber-700 dark:text-amber-300" title={globalAiDisabledReason}>
-                  {globalAiDisabledReason}
-                </p>
-              ) : activeAttentionMode === "AUTOMATICA" && activeAiAttention && !activeAiAttention.automaticAvailable ? (
-                <p className="truncate px-1 text-[9px] text-amber-700 dark:text-amber-300" title={activeAiAttention.blockedReason}>
-                  {activeAiAttention.blockedReason}
-                </p>
-              ) : null}
             </div>
 
             <div className="flex w-full items-center justify-center gap-1.5 md:w-auto md:justify-start md:gap-2">
@@ -5650,7 +4719,7 @@ export default function ChatPage() {
                   </div>
                 )}
               </div>}
-              {isUnassignedWaitingActive && activeAttentionMode === "AUTOMATICA" && (
+              {isUnassignedWaitingActive && (
                 <Button
                   type="button"
                   onClick={() => void handleAcceptCurrent()}
@@ -5675,12 +4744,11 @@ export default function ChatPage() {
                 <ArrowPathIcon className={cn("h-5 w-5", isMessagesLoading && "animate-spin")} />
               </button>
               <span
-                title={aiAttendingActive ? "Kiments IA atiende este chat. Cambia a atención humana para vender." : "Venta Rapida"}
+                title="Venta rápida"
               >
                 <button
                   type="button"
                   onClick={toggleSidebar}
-                  disabled={aiAttendingActive}
                   className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
                     isSidebarOpen
                       ? "bg-muted text-foreground"
@@ -5694,8 +4762,7 @@ export default function ChatPage() {
             </div>
           </div>
 
-          {!aiAttendingActive && (
-            <button
+          <button
               type="button"
               onClick={openTagModal}
               className="flex h-10 w-full items-center justify-between px-4 text-left text-sm text-muted-foreground hover:text-foreground transition-colors"
@@ -5718,7 +4785,6 @@ export default function ChatPage() {
               </span>
               <ChevronDownIcon className="h-4 w-4 text-muted-foreground" />
             </button>
-          )}
         </header>
 
         <div className="relative min-h-0 flex-1 overflow-hidden bg-muted/60">
@@ -5762,13 +4828,6 @@ export default function ChatPage() {
                       key={item.id}
                       item={item}
                       onOpenImagePreview={setImagePreview}
-                      paymentReview={
-                        activePaymentReview
-                          && String(activePaymentReview.evidenceMessageId) === String(item.id)
-                          ? activePaymentReview
-                          : null
-                      }
-                      onOpenPaymentReview={() => setPaymentReviewOpen(true)}
                       onRetry={retryMessage}
                       onReply={handleReplyToMessage}
                       onDelete={handleDeleteMessage}
@@ -5796,67 +4855,6 @@ export default function ChatPage() {
             tabIndex={-1}
           />
           {replyComposer}
-          {automaticResponseLimitReached && (
-            <div className="relative z-10 mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 shadow-sm dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-100">
-              <ExclamationTriangleIcon className="h-4 w-4 shrink-0" />
-              <p className="min-w-0 flex-1">
-                IA Kiments alcanzo el maximo de respuestas automaticas de este chat.
-              </p>
-              <Link href="/conexiones?tab=ia" className="shrink-0 font-semibold text-amber-800 underline underline-offset-2 hover:text-amber-950 dark:text-amber-200 dark:hover:text-white">
-                Aumentar limite
-              </Link>
-            </div>
-          )}
-          {/* Contexto IA Kiments (oculto temporalmente)
-          {activeAiMemory && (activeAiMemory.productName || activeAiMemory.cart.length > 0) && (
-            <div className="relative z-10 mb-2 rounded-lg border border-blue-200 bg-background/95 px-3 py-2 shadow-sm dark:border-blue-500/25">
-              <div className="flex items-start gap-2">
-                <SparklesIcon className="mt-0.5 h-4 w-4 shrink-0 text-blue-600 dark:text-blue-300" />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-[10px] font-semibold uppercase text-blue-700 dark:text-blue-300">Contexto IA Kiments</p>
-                    <button type="button" onClick={() => void clearAiMemory()} className="text-[10px] text-muted-foreground hover:text-foreground">
-                      Limpiar
-                    </button>
-                  </div>
-                  {activeAiMemory.productName && (
-                    <p className="mt-1 truncate text-xs font-medium">
-                      {activeAiMemory.productName}
-                      {activeAiMemory.color ? ` · ${activeAiMemory.color}` : ""}
-                      {activeAiMemory.size ? ` · Talla ${activeAiMemory.size}` : ""}
-                      {activeAiMemory.quantity ? ` · ${activeAiMemory.quantity} und.` : ""}
-                    </p>
-                  )}
-                  {activeAiMemory.cart.length > 0 && (
-                    <p className="mt-1 text-[10px] text-muted-foreground">
-                      Intencion de compra: {activeAiMemory.cart.reduce((total, item) => total + item.quantity, 0)} producto(s). No reserva stock.
-                    </p>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-          */}
-          {isAiPanelOpen
-            && !Boolean(activeAiRun?.outcome !== "FAILED" && (activeAiRun?.requiresHuman || activeAiRun?.outcome === "HUMAN_REQUIRED"))
-            && (
-            <AiCopilotCard
-              run={activeAiRun}
-              draft={aiDraftText}
-              processing={isAiProcessing}
-              submitting={isAiSubmitting || isChangingAiAttention}
-              error={aiError}
-              onDraftChange={setAiDraftText}
-              onSend={() => void decideAiDraft("SEND")}
-              onRegenerate={() => void handleRegenerateAi()}
-              onDiscard={() => void decideAiDraft("DISCARD")}
-              onTakeOver={() => void changeAiAttention("HUMANA")}
-              onClose={() => {
-                aiPanelConversationRef.current = null;
-                setIsAiPanelOpen(false);
-              }}
-            />
-          )}
           <div className="relative z-10 md:hidden">
             {isMobileRecording ? (
               <div className="flex min-h-12 items-center gap-2 rounded-[24px] bg-background/95 px-3 py-2 shadow-sm">
@@ -5864,7 +4862,7 @@ export default function ChatPage() {
                   type="button"
                   onClick={() => handleStopMobileAudioRecording("cancel")}
                   className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-red-500 transition-colors active:bg-red-500/10"
-                  aria-label="Cancelar grabación"
+                  aria-label="Cancelar grabaciÃƒÂ³n"
                 >
                   <TrashIcon className="h-5 w-5" />
                 </button>
@@ -5995,19 +4993,7 @@ export default function ChatPage() {
                       )}
                     </button>
                   </div>
-                  {activeAiState?.canGenerate && (
-                    <button
-                      type="button"
-                      onClick={handleOpenAi}
-                      disabled={isAiProcessing || isAiSubmitting}
-                      className="mb-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-blue-600 transition-colors hover:bg-blue-50 disabled:opacity-50 dark:text-blue-300 dark:hover:bg-blue-950"
-                      aria-label="Generar respuesta con IA Kiments"
-                      title="Generar respuesta con IA Kiments"
-                    >
-                      <SparklesIcon className="h-5 w-5" />
-                    </button>
-                  )}
-                  <button
+                                    <button
                     type="button"
                     onClick={handleAttachFileClick}
                     className="mb-1 flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
@@ -6235,19 +5221,7 @@ export default function ChatPage() {
                     </div>
                   )}
                 </div>
-                {activeAiState?.canGenerate && (
-                  <button
-                    type="button"
-                    onClick={handleOpenAi}
-                    disabled={isAiProcessing || isAiSubmitting}
-                    className="mb-1 flex h-9 w-7 shrink-0 items-center justify-center rounded-full text-blue-600 transition-colors hover:bg-blue-50 disabled:opacity-50 dark:text-blue-300 dark:hover:bg-blue-950"
-                    aria-label="Generar respuesta con IA Kiments"
-                    title="Generar respuesta con IA Kiments"
-                  >
-                    <SparklesIcon className="h-5 w-5" />
-                  </button>
-                )}
-                <button
+                                <button
                   type="button"
                   onClick={handleAttachFileClick}
                   className="mb-1 flex h-9 w-7 items-center justify-center rounded-full text-foreground transition-colors hover:bg-muted hover:text-foreground"
@@ -6473,18 +5447,6 @@ export default function ChatPage() {
           </div>
         </div>
         )}
-        <PaymentReviewModal
-          review={activePaymentReview}
-          open={paymentReviewOpen && Boolean(activePaymentReview)}
-          onOpenChange={setPaymentReviewOpen}
-          onAccept={() => void decidePayment("ACCEPT")}
-          onReject={() => {
-            if (window.confirm("¿Rechazar este pago y cancelar el pedido reservado?")) {
-              void decidePayment("REJECT");
-            }
-          }}
-          loading={paymentDecisionLoading}
-        />
         {imagePreview && (
           <div className="fixed inset-0 z-[80] flex flex-col bg-[#f7f5f2] text-slate-900 dark:bg-black dark:text-white">
             <header className="flex h-14 shrink-0 items-center gap-3 border-b border-slate-200/80 px-4 dark:border-white/10">
@@ -6534,9 +5496,9 @@ export default function ChatPage() {
         <div className="hidden w-[340px] shrink-0 md:block">
           <ChatSidebar
             conversationId={activeConversationId}
+            isAdmin={isAdmin}
             clientPhone={activeConversation?.phone || ""}
             contactName={activeConversation?.contactName}
-            aiAttending={aiAttendingActive}
             onClientUpdated={() => {
               void loadConversations();
             }}
@@ -6561,9 +5523,9 @@ export default function ChatPage() {
         <div className="min-h-0 flex-1 overflow-hidden">
           <ChatSidebar
             conversationId={activeConversationId}
+            isAdmin={isAdmin}
             clientPhone={activeConversation?.phone || ""}
             contactName={activeConversation?.contactName}
-            aiAttending={aiAttendingActive}
             onClientUpdated={() => {
               void loadConversations();
             }}
@@ -6684,7 +5646,7 @@ export default function ChatPage() {
                         {transferUser.name}
                       </span>
                       <span className="block truncate text-xs text-muted-foreground">
-                        {transferUser.role} · {transferUser.email}
+                        {transferUser.role} Ã‚Â· {transferUser.email}
                       </span>
                     </span>
                     <span
@@ -6786,7 +5748,7 @@ export default function ChatPage() {
             <DialogTitle>Eliminar chat</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Se eliminará esta conversación completa, incluidos sus mensajes, imágenes, audios y archivos. Esta acción no se puede deshacer.
+            Se eliminarÃƒÂ¡ esta conversaciÃƒÂ³n completa, incluidos sus mensajes, imÃƒÂ¡genes, audios y archivos. Esta acciÃƒÂ³n no se puede deshacer.
           </p>
         </div>
         <div className="mt-6 flex justify-end gap-2 border-t border-border bg-muted/30 px-6 py-4">

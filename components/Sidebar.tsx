@@ -12,6 +12,7 @@ import {
   HomeModernIcon,
   LinkIcon,
   MagnifyingGlassIcon,
+  ShoppingBagIcon,
   TagIcon,
   UserGroupIcon,
   XMarkIcon,
@@ -24,6 +25,7 @@ import {
   LinkIcon as LinkIconSolid,
   TagIcon as TagIconSolid,
   UserGroupIcon as UserGroupIconSolid,
+  ShoppingBagIcon as ShoppingBagIconSolid,
 } from "@heroicons/react/24/solid";
 import { useAuth } from "@/lib/auth/auth-context";
 import { CRM_STANDARD_USER_PATHS, isCrmAdmin } from "@/lib/auth/roles";
@@ -58,6 +60,12 @@ export const navSections: SidebarSection[] = [
         icon: ChatBubbleLeftRightIcon,
         iconActive: ChatBubbleLeftRightIconSolid,
       },
+        {
+          label: "Ventas",
+          href: "/ventas",
+          icon: ShoppingBagIcon,
+          iconActive: ShoppingBagIconSolid,
+        },
         {
           label: "Contacto",
           href: "/contacto",

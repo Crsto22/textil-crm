@@ -1,4 +1,4 @@
-const CACHE_NAME = "kiments-crm-v1";
+const CACHE_NAME = "kiments-crm-v2";
 const PRECACHE_URLS = ["/", "/pwa/icon-192.png", "/pwa/icon-512.png"];
 
 self.addEventListener("install", (event) => {
@@ -32,20 +32,15 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith("/api/")) return;
 
-  if (request.mode === "navigate") {
-    event.respondWith(
-      fetch(request)
-        .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
-          return response;
-        })
-        .catch(() =>
-          caches.match(request).then((cached) => cached || caches.match("/"))
-        )
-    );
-    return;
-  }
+  // Next/Turbopack genera chunks con referencias entre módulos. Guardarlos en
+  // caché puede mezclar compilaciones distintas y provocar "module factory is
+  // not available" después de una actualización o durante el desarrollo.
+  if (url.pathname.startsWith("/_next/")) return;
+
+  // Las vistas autenticadas siempre deben venir de la red. Dejar que el
+  // navegador gestione las navegaciones evita mostrar HTML de una compilación
+  // incompatible con los chunks actuales.
+  if (request.mode === "navigate") return;
 
   event.respondWith(
     caches.match(request).then((cached) => {

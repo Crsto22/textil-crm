@@ -29,6 +29,7 @@ interface HeaderProps {
 
 const pageTitles: Record<string, string> = {
   "/chat": "Chat",
+  "/ventas": "Ventas",
   "/contacto": "Contacto",
   "/conexiones": "Conexiones",
   "/configuracion": "Configuracion",

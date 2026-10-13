@@ -440,53 +440,50 @@ async function readApiMessage(response: Response, fallback: string) {
   }
 }
 
-function useNearViewport(rootMargin = "320px") {
-  const elementRef = useRef<HTMLDivElement>(null);
-  const [isNearViewport, setIsNearViewport] = useState(false);
-
-  useEffect(() => {
-    const element = elementRef.current;
-    if (!element || isNearViewport) return;
-    const observer = new IntersectionObserver(([entry]) => {
-      if (entry.isIntersecting) {
-        setIsNearViewport(true);
-        observer.disconnect();
-      }
-    }, { rootMargin });
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [isNearViewport, rootMargin]);
-
-  return { elementRef, isNearViewport };
-}
-
 function useAuthenticatedBlobUrl(source: string | undefined, enabled: boolean) {
   const [blobUrl, setBlobUrl] = useState<string>();
+  const [error, setError] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     if (!source || source.startsWith("blob:") || !enabled) return;
 
     const controller = new AbortController();
     let createdUrl: string | undefined;
-    void authFetch(source, { cache: "force-cache", signal: controller.signal })
+    void authFetch(source, { cache: "no-store", signal: controller.signal })
       .then((response) => {
-        if (!response.ok) throw new Error("No se pudo cargar el archivo");
+        if (!response.ok) throw new Error(`No se pudo cargar el archivo (${response.status})`);
         return response.blob();
       })
       .then((blob) => {
         if (controller.signal.aborted) return;
+        if (blob.size === 0 || blob.type.includes("application/json")) {
+          throw new Error("El servidor no devolvio un archivo valido");
+        }
         createdUrl = URL.createObjectURL(blob);
         setBlobUrl(createdUrl);
+        setError(false);
       })
-      .catch(() => undefined);
+      .catch((loadError) => {
+        if (controller.signal.aborted) return;
+        console.error("[CRM_CHAT_MEDIA]", loadError);
+        setError(true);
+      });
 
     return () => {
       controller.abort();
       if (createdUrl) URL.revokeObjectURL(createdUrl);
     };
-  }, [enabled, source]);
+  }, [attempt, enabled, source]);
 
-  return source?.startsWith("blob:") ? source : blobUrl;
+  return {
+    url: source?.startsWith("blob:") ? source : blobUrl,
+    error,
+    retry: () => {
+      setError(false);
+      setAttempt((current) => current + 1);
+    },
+  };
 }
 
 async function openAuthenticatedMedia(source: string, fileName: string, download: boolean) {
@@ -1349,11 +1346,12 @@ function MessageBubble({
   const [audioDuration, setAudioDuration] = useState<number>();
   const [audioRequested, setAudioRequested] = useState(false);
   const [sendingReceipt, setSendingReceipt] = useState<"PDF" | "TICKET" | null>(null);
-  const { elementRef: mediaViewportRef, isNearViewport } = useNearViewport();
   const isVisualMedia = (isImageFile(item.fileType, item.text) || isVideoFile(item.fileType, item.text))
     && Boolean(item.fileUrl);
-  const visualMediaUrl = useAuthenticatedBlobUrl(item.fileUrl, isVisualMedia && isNearViewport);
-  const authenticatedAudioUrl = useAuthenticatedBlobUrl(item.audioUrl, audioRequested);
+  const visualMedia = useAuthenticatedBlobUrl(item.fileUrl, isVisualMedia);
+  const visualMediaUrl = visualMedia.url;
+  const authenticatedAudio = useAuthenticatedBlobUrl(item.audioUrl, audioRequested);
+  const authenticatedAudioUrl = authenticatedAudio.url;
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -1530,7 +1528,7 @@ function MessageBubble({
     const imageAlt = mediaCaption || item.text || "Imagen";
 
     return (
-      <div ref={mediaViewportRef} className={`relative w-fit max-w-[88%] rounded-md text-sm md:max-w-[55%] ${
+      <div className={`relative w-fit max-w-[88%] rounded-md text-sm md:max-w-[55%] ${
         isOutgoingFile ? "whatsapp-outgoing-bubble ml-auto" : "mr-auto bg-card text-card-foreground"
       } ${isStickerAttachment ? "bg-transparent p-0 shadow-none" : "shadow-sm"} ${
         isImageAttachment || isVideoAttachment || isPdfAttachmentMessage ? "p-1.5" : "px-3 py-3"
@@ -1543,26 +1541,43 @@ function MessageBubble({
         )}
         {isImageAttachment ? (
           <div className="space-y-1.5">
-            <button
-              type="button"
-              onClick={() => visualMediaUrl && onOpenImagePreview({ alt: imageAlt, url: visualMediaUrl })}
-              aria-label={imageAlt}
-              className={cn(
-                "block overflow-hidden",
-                isStickerAttachment
-                  ? "h-40 w-40 bg-transparent sm:h-44 sm:w-44"
-                  : "h-64 w-[min(68vw,320px)] rounded bg-muted",
-              )}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={visualMediaUrl}
-                alt={imageAlt}
-                loading="lazy"
-                decoding="async"
-                className={cn("h-full w-full", isStickerAttachment ? "object-contain" : "object-cover")}
-              />
-            </button>
+            {visualMediaUrl ? (
+              <button
+                type="button"
+                onClick={() => onOpenImagePreview({ alt: imageAlt, url: visualMediaUrl })}
+                aria-label={imageAlt}
+                className={cn(
+                  "block overflow-hidden",
+                  isStickerAttachment
+                    ? "h-40 w-40 bg-transparent sm:h-44 sm:w-44"
+                    : "h-64 w-[min(68vw,320px)] rounded bg-muted",
+                )}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={visualMediaUrl}
+                  alt={imageAlt}
+                  loading="lazy"
+                  decoding="async"
+                  className={cn("h-full w-full", isStickerAttachment ? "object-contain" : "object-cover")}
+                />
+              </button>
+            ) : visualMedia.error ? (
+              <div className="flex h-64 w-[min(68vw,320px)] flex-col items-center justify-center gap-2 rounded bg-muted px-4 text-center text-xs text-muted-foreground">
+                <PhotoIcon className="h-8 w-8" />
+                <span>No se pudo cargar la imagen.</span>
+                <button
+                  type="button"
+                  onClick={visualMedia.retry}
+                  className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-3 py-1 font-semibold text-foreground hover:bg-accent"
+                >
+                  <ArrowPathIcon className="h-3.5 w-3.5" />
+                  Reintentar
+                </button>
+              </div>
+            ) : (
+              <div className="h-64 w-[min(68vw,320px)] animate-pulse rounded bg-muted" aria-label="Cargando imagen" />
+            )}
             {mediaCaption ? (
               <p className="whitespace-pre-wrap break-words px-1 text-sm leading-relaxed">
                 {mediaCaption}
@@ -1584,6 +1599,18 @@ function MessageBubble({
                   {mediaCaption}
                 </p>
               ) : null}
+            </div>
+          ) : visualMedia.error ? (
+            <div className="flex h-48 w-[min(76vw,360px)] flex-col items-center justify-center gap-2 rounded bg-muted text-xs text-muted-foreground">
+              <span>No se pudo cargar el video.</span>
+              <button
+                type="button"
+                onClick={visualMedia.retry}
+                className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-3 py-1 font-semibold text-foreground hover:bg-accent"
+              >
+                <ArrowPathIcon className="h-3.5 w-3.5" />
+                Reintentar
+              </button>
             </div>
           ) : (
             <div className="h-48 w-[min(76vw,360px)] animate-pulse rounded bg-muted" />

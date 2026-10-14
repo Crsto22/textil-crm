@@ -92,7 +92,7 @@ const MESSAGE_CACHE_LIMIT = 5;
 type ConversationStatus = "ESPERA" | "ATENDIDO" | "RESUELTO";
 type AttentionQueue = "AGENT_ACTIVE" | "ADVISOR_REQUIRED" | "HUMAN_ACTIVE" | "RESOLVED";
 type WaitingReason = "ADVISOR_REQUIRED";
-type ConversationFilter = "all" | "agent" | "waiting" | "resolved";
+type ConversationFilter = "all" | "agent" | "human" | "waiting" | "resolved";
 
 type CrmConversation = Conversation & {
   phone: string;
@@ -133,6 +133,11 @@ interface CrmConversationResponse {
   agentState?: string | null;
   reservationExpiresAt?: string | null;
   tags?: CrmConversationTagResponse[] | null;
+}
+
+interface EnableAgentResponse {
+  conversation: CrmConversationResponse;
+  pendingCustomerMessage: boolean;
 }
 
 interface ConversationPageResponse {
@@ -2057,6 +2062,7 @@ export default function ChatPage() {
         ? CONVERSATION_PAGE_SIZE
         : Math.max(CONVERSATION_PAGE_SIZE, Math.ceil(loadedCount / CONVERSATION_PAGE_SIZE) * CONVERSATION_PAGE_SIZE);
     const view = activeFilter === "agent" ? "AGENT"
+      : activeFilter === "human" ? "ATTENDED"
       : activeFilter === "waiting" ? "WAITING"
         : activeFilter === "resolved" ? "RESOLVED" : "ALL";
     const cacheKey = `${view}|${conversationSearch}|${selectedTagFilterId ?? ""}`;
@@ -2064,6 +2070,7 @@ export default function ChatPage() {
     const cachedQueueCount = cached
       ? view === "WAITING" ? cached.counts.waiting
           : view === "AGENT" ? cached.counts.agent
+          : view === "ATTENDED" ? cached.counts.attended
           : view === "RESOLVED" ? cached.counts.resolved
             : cached.counts.all
       : 0;
@@ -2141,6 +2148,7 @@ export default function ChatPage() {
 
   const refreshConversationCounts = useCallback(async () => {
     const view = activeFilter === "agent" ? "AGENT"
+      : activeFilter === "human" ? "ATTENDED"
       : activeFilter === "waiting" ? "WAITING"
         : activeFilter === "resolved" ? "RESOLVED" : "ALL";
     const params = new URLSearchParams({ view, page: "0", size: "1" });
@@ -2417,7 +2425,7 @@ export default function ChatPage() {
       setConversations((current) =>
         current.map((conversation) => conversation.id === conversationId ? accepted : conversation),
       );
-      setActiveFilter("all");
+      setActiveFilter("human");
       await loadMessages(conversationId);
       toast.success("Chat aceptado. Atencion humana activada");
     } catch (error) {
@@ -2426,6 +2434,43 @@ export default function ChatPage() {
       setChatError(error instanceof Error ? error.message : "No se pudo aceptar el chat");
     } finally {
       setAcceptingConversationId(null);
+    }
+  };
+
+  const handleEnableAgentCurrent = async () => {
+    if (!activeConversationId || isConversationActionPending) return;
+    const conversationId = activeConversationId;
+    const toastId = toast.loading("Habilitando IA Kiments...");
+    setIsConversationActionPending(true);
+    setChatError("");
+    try {
+      const response = await authFetch(`/api/crm/whatsapp/conversations/${conversationId}/enable-agent`, {
+        method: "POST",
+      });
+      if (!response.ok) {
+        throw new Error(await readApiMessage(response, "No se pudo habilitar IA Kiments"));
+      }
+      const result = (await response.json()) as EnableAgentResponse;
+      const updated = mapConversation(result.conversation);
+      setConversations((current) => {
+        const next = current.map((conversation) => conversation.id === conversationId ? updated : conversation);
+        conversationsRef.current = next;
+        return next;
+      });
+      conversationCacheRef.current = {};
+      setActiveFilter("agent");
+      toast.success(
+        result.pendingCustomerMessage
+          ? "IA Kiments habilitada. Responderá el mensaje pendiente."
+          : "IA Kiments habilitada. Esperará el próximo mensaje del cliente.",
+        { id: toastId },
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No se pudo habilitar IA Kiments";
+      setChatError(message);
+      toast.error(message, { id: toastId });
+    } finally {
+      setIsConversationActionPending(false);
     }
   };
 
@@ -2493,6 +2538,7 @@ export default function ChatPage() {
       const activeConversation = conversations.find((conversation) => conversation.id === activeConversationId);
       const willBeVisible = filter === "all"
         || (filter === "agent" && activeConversation?.attentionQueue === "AGENT_ACTIVE")
+        || (filter === "human" && activeConversation?.attentionQueue === "HUMAN_ACTIVE")
         || (filter === "waiting" && activeConversation?.attentionQueue === "ADVISOR_REQUIRED")
         || (filter === "resolved" && activeConversation?.attentionQueue === "RESOLVED");
       if (!willBeVisible) {
@@ -2534,6 +2580,7 @@ export default function ChatPage() {
     const mappedConversation = mapConversation(event.conversation);
     refreshConversationCountsRef.current();
     const expectedQueue: AttentionQueue = activeFilter === "agent" ? "AGENT_ACTIVE"
+      : activeFilter === "human" ? "HUMAN_ACTIVE"
       : activeFilter === "waiting" ? "ADVISOR_REQUIRED"
         : activeFilter === "resolved" ? "RESOLVED" : "HUMAN_ACTIVE";
     const accessible = isAdmin
@@ -2543,6 +2590,8 @@ export default function ChatPage() {
       ? true
       : activeFilter === "agent"
         ? mappedConversation.attentionQueue === "AGENT_ACTIVE"
+      : activeFilter === "human"
+        ? mappedConversation.attentionQueue === "HUMAN_ACTIVE"
       : activeFilter === "waiting"
         ? mappedConversation.attentionQueue === "ADVISOR_REQUIRED"
         : mappedConversation.attentionQueue === expectedQueue);
@@ -2758,7 +2807,9 @@ export default function ChatPage() {
   const activeConversationTags = activeConversation?.tags ?? [];
   const allConversationCount = conversationCounts.all;
   const agentConversationCount = conversationCounts.agent;
+  const humanConversationCount = conversationCounts.attended;
   const waitingCount = conversationCounts.waiting;
+  const isAgentActive = activeConversation?.attentionQueue === "AGENT_ACTIVE";
   const isSharedUnassignedActive = Boolean(
     activeConversation
     && !activeConversation.assignedUserId
@@ -4502,12 +4553,33 @@ export default function ChatPage() {
                 )}
               >
                 <SparklesIcon className="h-4 w-4 shrink-0" />
-                <span className="min-w-0 flex-1 truncate">IA atendiendo</span>
+                <span className="min-w-0 flex-1 truncate">IA Kiments</span>
                 <span className={cn(
                   "inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-[10px] font-bold tabular-nums",
                   activeFilter === "agent" ? "bg-sky-600 text-white" : "bg-background text-muted-foreground",
                 )}>
                   {agentConversationCount}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                aria-pressed={activeFilter === "human"}
+                onClick={() => changeFilter("human")}
+                className={cn(
+                  "group inline-flex min-h-9 items-center gap-2 rounded-xl border px-2.5 text-left text-xs font-semibold transition-all",
+                  activeFilter === "human"
+                    ? "border-violet-200 bg-violet-50 text-violet-800 shadow-sm dark:border-violet-800 dark:bg-violet-950/70 dark:text-violet-200"
+                    : "border-transparent text-muted-foreground hover:bg-background/70 hover:text-foreground",
+                )}
+              >
+                <UserIconSolid className="h-4 w-4 shrink-0" />
+                <span className="min-w-0 flex-1 truncate">Humano</span>
+                <span className={cn(
+                  "inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-[10px] font-bold tabular-nums",
+                  activeFilter === "human" ? "bg-violet-600 text-white" : "bg-background text-muted-foreground",
+                )}>
+                  {humanConversationCount}
                 </span>
               </button>
 
@@ -4612,7 +4684,8 @@ export default function ChatPage() {
                   onAccept={
                     conversation.status === "ESPERA"
                       && !conversation.assignedUserId
-                      && conversation.attentionQueue === "ADVISOR_REQUIRED"
+                      && (conversation.attentionQueue === "ADVISOR_REQUIRED"
+                        || conversation.attentionQueue === "AGENT_ACTIVE")
                       ? () => void handleAcceptCurrent(conversation.id)
                       : undefined
                   }
@@ -4678,6 +4751,15 @@ export default function ChatPage() {
                 <p className="mt-1 text-xs text-foreground">
                   Asignado: {activeConversation?.assignedUserName || "Sin asignar"}
                 </p>
+                <p className="mt-1 text-xs font-semibold text-muted-foreground">
+                  Control: {activeConversation?.attentionQueue === "AGENT_ACTIVE"
+                    ? "IA Kiments"
+                    : activeConversation?.attentionQueue === "HUMAN_ACTIVE"
+                      ? "Humano"
+                      : activeConversation?.attentionQueue === "ADVISOR_REQUIRED"
+                        ? "En espera"
+                        : "Resuelto"}
+                </p>
                 <p className="mt-1 text-xs text-foreground">
                   {getConversationContactLabel(activeConversation)}: {activeConversation?.phone || "Numero no disponible"}
                 </p>
@@ -4685,7 +4767,7 @@ export default function ChatPage() {
             </div>
 
             <div className="flex w-full items-center justify-center gap-1.5 md:w-auto md:justify-start md:gap-2">
-              {!isUnassignedWaitingActive && <div className="relative flex rounded-full bg-muted text-foreground shadow-sm">
+              {!isUnassignedWaitingActive && !isAgentActive && <div className="relative flex rounded-full bg-muted text-foreground shadow-sm">
                 {resolvedIds.has(activeConversationId) ? (
                   <Button
                     onClick={() => void handleReopenCurrent()}
@@ -4746,7 +4828,19 @@ export default function ChatPage() {
                   </div>
                 )}
               </div>}
-              {isUnassignedWaitingActive && (
+              {activeConversation?.attentionQueue === "HUMAN_ACTIVE" && (
+                <Button
+                  type="button"
+                  onClick={() => void handleEnableAgentCurrent()}
+                  disabled={isConversationActionPending}
+                  className="h-8 rounded-full bg-sky-600 px-3 text-[10px] font-bold text-white shadow-sm hover:bg-sky-700 disabled:opacity-60 md:h-10 md:px-5 md:text-xs"
+                  aria-label="Habilitar IA Kiments"
+                  title="Habilitar IA Kiments"
+                >
+                  {isConversationActionPending ? "HABILITANDO..." : "HABILITAR IA"}
+                </Button>
+              )}
+              {(isUnassignedWaitingActive || isAgentActive) && (
                 <Button
                   type="button"
                   onClick={() => void handleAcceptCurrent()}

@@ -63,9 +63,14 @@ interface CrmSale {
   deliveryMethod: "PICKUP" | "SHALOM" | null
   shalomAgency: string | null
   shalomAgencyAddress: string | null
+  filmAddonId: number | null
   filmStatus: string | null
   filmAmount: number | null
   filmExpiresAt: string | null
+  filmResolutionSource: string | null
+  coveredBySaleId: number | null
+  filmResolvedAt: string | null
+  filmResolvedBy: string | null
   filmEvidence: FilmEvidence | null
   items: SaleItem[]
 }
@@ -131,6 +136,17 @@ function deliveryLabel(method: CrmSale["deliveryMethod"]) {
   return "Sin definir"
 }
 
+function filmLabel(status: string | null) {
+  if (status === "CONFIRMED") return "Pagado"
+  if (status === "COVERED_BY_PREVIOUS_ORDER") return "Cubierto por pedido anterior"
+  if (status === "ADVISOR_REVIEW_REQUIRED") return "Pendiente de revisión"
+  if (status === "AWAITING_PREVIOUS_ORDER_DECISION") return "Esperando respuesta"
+  if (status === "AWAITING_PAYMENT") return "Pendiente de pago"
+  if (status === "PAYMENT_OVERDUE") return "Vencido"
+  if (status === "PAYMENT_CONFIGURATION_REQUIRED") return "Revisión requerida"
+  return status || "Sin film"
+}
+
 function useProtectedMedia(path?: string, enabled = false) {
   const [url, setUrl] = useState<string>()
   useEffect(() => {
@@ -172,6 +188,9 @@ function ReviewDialog({ sale, open, onOpenChange, onUpdated }: {
   const [filmRejecting, setFilmRejecting] = useState(false)
   const [filmReason, setFilmReason] = useState("")
   const [filmDecision, setFilmDecision] = useState<"ACCEPT" | "REJECT" | null>(null)
+  const [showFilmReview, setShowFilmReview] = useState(false)
+  const [manualFilmLoading, setManualFilmLoading] = useState(false)
+  const [coveredBySaleId, setCoveredBySaleId] = useState("")
   const mediaUrl = useProtectedMedia(
     sale?.evidenceId ? `/api/crm/whatsapp/payment-evidences/${sale.evidenceId}/media` : undefined,
     open,
@@ -243,6 +262,7 @@ function ReviewDialog({ sale, open, onOpenChange, onUpdated }: {
       }
       toast.success(action === "ACCEPT" ? "Film protector confirmado. Ahora revisa el pago principal." : "Film retirado. Ahora revisa el pago principal.")
       setFilmDecision(action)
+      setShowFilmReview(false)
       setFilmRejecting(false)
       setFilmReason("")
       onUpdated()
@@ -251,10 +271,41 @@ function ReviewDialog({ sale, open, onOpenChange, onUpdated }: {
     } finally { setFilmLoading(false) }
   }
 
+  const confirmFilmManually = async () => {
+    if (!sale?.filmAddonId || manualFilmLoading) return
+    const previousSale = coveredBySaleId.trim() ? Number(coveredBySaleId.trim()) : null
+    if (previousSale !== null && (!Number.isInteger(previousSale) || previousSale <= 0)) {
+      toast.error("Ingresa un número de pedido anterior válido")
+      return
+    }
+    if (!window.confirm("Confirmo que verifiqué el pago del film o que está cubierto por el pedido anterior indicado.")) return
+    setManualFilmLoading(true)
+    try {
+      const response = await authFetch(`/api/crm/whatsapp/film-addons/${sale.filmAddonId}/manual-confirm`, {
+        method: "POST",
+        body: JSON.stringify({ confirmedExternal: true, coveredBySaleId: previousSale }),
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null)
+        throw new Error(payload?.message || "No se pudo confirmar el film")
+      }
+      toast.success(previousSale ? "Film cubierto por el pedido anterior." : "Pago del film confirmado manualmente.")
+      onOpenChange(false)
+      onUpdated()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo confirmar el film")
+    } finally { setManualFilmLoading(false) }
+  }
+
   const canReview = sale?.mainEvidenceStatus === "ACEPTABLE" && sale.saleStatus !== "ANULADA"
   const canReviewFilm = sale?.filmEvidence?.validationStatus === "ACEPTABLE" && sale.saleStatus !== "ANULADA"
   const filmRequiresReview = Boolean(canReviewFilm && !filmDecision)
   const hasFilmEvidence = Boolean(sale?.filmEvidence)
+  const unresolvedFilm = Boolean(sale?.filmAddonId && [
+    "AWAITING_PREVIOUS_ORDER_DECISION", "ADVISOR_REVIEW_REQUIRED", "AWAITING_PAYMENT",
+    "PAYMENT_OVERDUE", "PAYMENT_CONFIGURATION_REQUIRED",
+  ].includes(sale?.filmStatus || ""))
+  const canConfirmFilmManually = unresolvedFilm && !hasFilmEvidence
   return (
     <Dialog open={open} onOpenChange={(next) => {
       if (!loading && !filmLoading) onOpenChange(next)
@@ -265,6 +316,8 @@ function ReviewDialog({ sale, open, onOpenChange, onUpdated }: {
         setFilmRejecting(false)
         setFilmReason("")
         setFilmDecision(null)
+        setShowFilmReview(false)
+        setCoveredBySaleId("")
       }
     }}>
       <DialogContent className="max-h-[92dvh] overflow-y-auto p-0 sm:max-w-4xl" showCloseButton={!loading && !filmLoading}>
@@ -276,7 +329,7 @@ function ReviewDialog({ sale, open, onOpenChange, onUpdated }: {
             <span>Validar pagos · {sale?.number}</span>
           </DialogTitle>
           <p className="text-sm text-muted-foreground">
-            {filmRequiresReview ? "Primero revisa el pago adicional del film protector." : "Revisa el comprobante principal antes de aceptar o anular la venta."}
+            {filmRequiresReview && showFilmReview ? "Revisa el comprobante adicional del film protector." : "Revisa el pago principal y el estado del film de forma independiente."}
           </p>
           {hasFilmEvidence ? (
             <div className="mt-3 grid grid-cols-[1fr_auto_1fr] items-center gap-2" aria-label="Progreso de validación">
@@ -303,7 +356,7 @@ function ReviewDialog({ sale, open, onOpenChange, onUpdated }: {
           ) : null}
         </DialogHeader>
 
-        {filmRequiresReview ? (
+        {filmRequiresReview && showFilmReview ? (
           <div className="grid min-h-[500px] md:grid-cols-[1.15fr_.85fr]">
             <div className="flex min-h-80 items-center justify-center bg-violet-50/60 p-5 dark:bg-violet-950/10">
               {filmMediaUrl ? (
@@ -441,8 +494,29 @@ function ReviewDialog({ sale, open, onOpenChange, onUpdated }: {
                     ? "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300"
                     : "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300",
                 )}>
-                  {filmDecision === "ACCEPT" ? "Pago aceptado" : filmDecision === "REJECT" ? "Retirado" : sale.filmStatus || "Sin film"}
+                  {filmDecision === "ACCEPT" ? "Pago aceptado" : filmDecision === "REJECT" ? "Retirado" : filmLabel(sale.filmStatus)}
                 </span>
+              </div>
+              {sale.coveredBySaleId ? <p className="mt-2 text-xs text-muted-foreground">Cubierto por pedido #{sale.coveredBySaleId}</p> : null}
+              {filmRequiresReview ? (
+                <Button className="mt-3 w-full" variant="outline" onClick={() => setShowFilmReview(true)}>
+                  Revisar comprobante del film
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+        {canConfirmFilmManually ? (
+          <div className="border-t bg-amber-50/70 p-4 dark:bg-amber-500/5">
+            <div className="mx-auto max-w-2xl rounded-xl border border-amber-200 bg-background p-4 dark:border-amber-800">
+              <p className="font-semibold">Film pendiente sin comprobante</p>
+              <p className="mt-1 text-xs text-muted-foreground">Confirma únicamente después de verificar el pago. Si ya fue pagado para un envío conjunto, indica el pedido anterior y no se registrará otro cobro de S/2.</p>
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                <input value={coveredBySaleId} onChange={(event) => setCoveredBySaleId(event.target.value.replace(/\D/g, ""))}
+                  placeholder="Pedido anterior (opcional)" className="h-10 flex-1 rounded-lg border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-amber-500/30" />
+                <Button disabled={manualFilmLoading} onClick={() => void confirmFilmManually()}>
+                  {manualFilmLoading ? "Confirmando..." : "Confirmar pago del film"}
+                </Button>
               </div>
             </div>
           </div>
@@ -593,6 +667,7 @@ export default function CrmSalesPage() {
                     </td>
                     <td className="px-3 py-3 font-medium">{sale.branch || "Sin sucursal"}</td>
                     <td className="px-3 py-3">
+                      <div className="flex flex-col items-start gap-1">
                       <span className={cn(
                         "inline-flex rounded-full px-2.5 py-1 text-xs font-semibold",
                         sale.deliveryMethod === "PICKUP" && "bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300",
@@ -605,6 +680,13 @@ export default function CrmSalesPage() {
                         ) : null}
                         {deliveryLabel(sale.deliveryMethod)}
                       </span>
+                      {sale.deliveryMethod === "SHALOM" && sale.filmAddonId ? (
+                        <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold",
+                          ["CONFIRMED", "COVERED_BY_PREVIOUS_ORDER"].includes(sale.filmStatus || "")
+                            ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
+                            : "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300")}>Film: {filmLabel(sale.filmStatus)}</span>
+                      ) : null}
+                      </div>
                     </td>
                     <td className="px-3 py-3 text-center font-semibold">{sale.items.length}</td>
                     <td className="px-3 py-3">
@@ -622,7 +704,7 @@ export default function CrmSalesPage() {
                       </span>
                     </td>
                     <td className="px-3 py-3 text-center">
-                      <Button size="sm" variant={sale.reviewStatus === "PENDING" ? "default" : "outline"} disabled={!sale.evidenceId} onClick={() => setSelected(sale)}>
+                      <Button size="sm" variant={sale.reviewStatus === "PENDING" ? "default" : "outline"} disabled={!sale.evidenceId && !sale.filmAddonId} onClick={() => setSelected(sale)}>
                         {sale.reviewStatus === "PENDING" ? "Validar pago" : "Ver detalle"}
                       </Button>
                     </td>
@@ -676,6 +758,9 @@ export default function CrmSalesPage() {
                     ) : null}
                     {deliveryLabel(sale.deliveryMethod)}
                   </span>
+                  {sale.deliveryMethod === "SHALOM" && sale.filmAddonId ? (
+                    <span className="inline-flex rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">Film: {filmLabel(sale.filmStatus)}</span>
+                  ) : null}
                 </div>
 
                 <div className="mt-2 flex items-end justify-between gap-3">
@@ -687,7 +772,7 @@ export default function CrmSalesPage() {
                     className="h-8 shrink-0 rounded-lg px-3 text-xs"
                     size="sm"
                     variant={sale.reviewStatus === "PENDING" ? "default" : "outline"}
-                    disabled={!sale.evidenceId}
+                    disabled={!sale.evidenceId && !sale.filmAddonId}
                     onClick={() => setSelected(sale)}
                   >
                     {sale.reviewStatus === "PENDING" ? "Validar" : "Detalle"}

@@ -2939,7 +2939,11 @@ export default function ChatPage() {
   };
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const toggleSidebar = () => setIsSidebarOpen((prev) => !prev);
+  const [sidebarPanel, setSidebarPanel] = useState<"agent" | "sale">("sale");
+  const openQuickSaleSidebar = () => {
+    setSidebarPanel("sale");
+    setIsSidebarOpen(true);
+  };
 
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [activeMobileEmojiCategory, setActiveMobileEmojiCategory] =
@@ -4869,7 +4873,7 @@ export default function ChatPage() {
               >
                 <button
                   type="button"
-                  onClick={toggleSidebar}
+                  onClick={openQuickSaleSidebar}
                   className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
                     isSidebarOpen
                       ? "bg-muted text-foreground"
@@ -5625,6 +5629,8 @@ export default function ChatPage() {
             }}
             onSaleCompleted={() => undefined}
             onClose={() => setIsSidebarOpen(false)}
+            activePanel={sidebarPanel}
+            onActivePanelChange={setSidebarPanel}
           />
         </div>
       )}
@@ -5650,8 +5656,13 @@ export default function ChatPage() {
             onClientUpdated={() => {
               void loadConversations();
             }}
-            onSaleCompleted={() => undefined}
+            onSaleCompleted={() => {
+              setIsSidebarOpen(false);
+              void loadConversations();
+            }}
             onClose={() => setIsSidebarOpen(false)}
+            activePanel={sidebarPanel}
+            onActivePanelChange={setSidebarPanel}
           />
         </div>
       </div>

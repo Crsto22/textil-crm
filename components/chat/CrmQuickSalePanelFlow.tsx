@@ -19,7 +19,6 @@ import {
   TrashIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline"
-import { Copy } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -396,7 +395,6 @@ export function CrmQuickSalePanelFlow({
   const [discountMode, setDiscountMode] = useState<DiscountMode>("none")
   const [discountValue, setDiscountValue] = useState("")
   const [selectedMethodId, setSelectedMethodId] = useState<number | null>(null)
-  const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null)
   const [operationCode, setOperationCode] = useState("")
   const [paymentDate, setPaymentDate] = useState(today)
   const [paymentTime, setPaymentTime] = useState("")
@@ -694,11 +692,7 @@ export function CrmQuickSalePanelFlow({
             selectedMethodId={selectedMethodId}
             setSelectedMethodId={(value) => {
               setSelectedMethodId(value)
-              const method = options?.metodosPago.find((item) => item.idMetodoPago === value)
-              setSelectedAccountId(method?.cuentas?.[0]?.idMetodoPagoCuenta ?? null)
             }}
-            selectedAccountId={selectedAccountId}
-            setSelectedAccountId={setSelectedAccountId}
             operationCode={operationCode}
             setOperationCode={setOperationCode}
             paymentDate={paymentDate}
@@ -1127,8 +1121,6 @@ function PaymentStep({
   selectedMethod,
   selectedMethodId,
   setSelectedMethodId,
-  selectedAccountId,
-  setSelectedAccountId,
   operationCode,
   setOperationCode,
   paymentDate,
@@ -1145,8 +1137,6 @@ function PaymentStep({
   selectedMethod: MetodoPago | null
   selectedMethodId: number | null
   setSelectedMethodId: (value: number) => void
-  selectedAccountId: number | null
-  setSelectedAccountId: (value: number) => void
   operationCode: string
   setOperationCode: (value: string) => void
   paymentDate: string
@@ -1170,18 +1160,6 @@ function PaymentStep({
         </div>
       </div>
 
-      {selectedMethod && selectedMethod.cuentas.length > 1 ? (
-        <select
-          value={selectedAccountId ?? ""}
-          onChange={(event) => setSelectedAccountId(Number(event.target.value))}
-          className="h-9 w-full rounded-xl border border-slate-200 bg-white px-3 text-[11px] dark:border-slate-700 dark:bg-slate-950"
-        >
-          {selectedMethod.cuentas.map((account) => (
-            <option key={account.idMetodoPagoCuenta} value={account.idMetodoPagoCuenta}>{account.numeroCuenta}</option>
-          ))}
-        </select>
-      ) : null}
-
       <div className="grid grid-cols-3 gap-1.5">
         {methods.map((method) => {
           const asset = paymentIcon(method.nombre)
@@ -1199,41 +1177,58 @@ function PaymentStep({
                 </span>
                 <span className="max-w-full truncate text-[10px] font-bold leading-tight">{method.nombre}</span>
               </span>
-              {method.cuentas?.length ? (
-                <span className="mt-1 block space-y-1">
-                  {method.cuentas.slice(0, 1).map((cuenta) => (
-                    <span key={cuenta.idMetodoPagoCuenta} className="flex min-w-0 items-center justify-between gap-1 rounded-lg bg-slate-100 px-1.5 py-1 font-mono text-[9px] dark:bg-slate-800">
-                      <span className="truncate">{cuenta.numeroCuenta}</span>
-                      <Copy className="h-3 w-3 shrink-0" onClick={(event) => {
-                        event.stopPropagation()
-                        void navigator.clipboard.writeText(cuenta.numeroCuenta)
-                        toast.success("Cuenta copiada")
-                      }} />
-                    </span>
-                  ))}
-                  {method.cuentas.length > 1 ? <span className="block truncate text-[9px] font-semibold text-slate-400">+{method.cuentas.length - 1}</span> : null}
-                </span>
-              ) : null}
             </button>
           )
         })}
       </div>
 
       {selectedMethod?.requiereCodigoOperacion || selectedMethod?.requiereFechaPago || selectedMethod?.requiereHoraPago ? (
-        <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-950">
           {selectedMethod?.requiereCodigoOperacion ? (
-            <input
-              value={operationCode}
-              onChange={(event) => setOperationCode(event.target.value)}
-              placeholder="Codigo de operacion"
-              className="col-span-2 h-9 w-full rounded-xl border border-slate-200 px-3 text-xs outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-950"
-            />
+            <label className="block space-y-1.5">
+              <span className="flex items-center gap-2 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                Código de operación
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[8px] font-bold uppercase text-slate-500 dark:bg-slate-800">Obligatorio</span>
+              </span>
+              <input
+                value={operationCode}
+                onChange={(event) => setOperationCode(event.target.value)}
+                placeholder="Ingresa el código"
+                inputMode="numeric"
+                autoComplete="off"
+                className="h-11 w-full rounded-xl border border-slate-200 px-3 text-base outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-950 sm:h-9 sm:text-xs"
+              />
+            </label>
           ) : null}
-          {selectedMethod?.requiereFechaPago ? (
-            <input type="date" value={paymentDate} onChange={(event) => setPaymentDate(event.target.value)} className="h-9 min-w-0 rounded-xl border border-slate-200 px-2 text-[11px] dark:border-slate-700 dark:bg-slate-950" />
-          ) : null}
-          {selectedMethod?.requiereHoraPago ? (
-            <input type="time" value={paymentTime} onChange={(event) => setPaymentTime(event.target.value)} className="h-9 min-w-0 rounded-xl border border-slate-200 px-2 text-[11px] dark:border-slate-700 dark:bg-slate-950" />
+          {selectedMethod?.requiereFechaPago || selectedMethod?.requiereHoraPago ? (
+            <div className="space-y-1.5">
+              <p className="flex items-center gap-2 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                Fecha y hora del pago de la operación
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[8px] font-bold uppercase text-slate-500 dark:bg-slate-800">Obligatorio</span>
+              </p>
+              <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,0.8fr)_auto] gap-2">
+                {selectedMethod?.requiereFechaPago ? (
+                  <label className="min-w-0 space-y-1">
+                    <span className="block text-[10px] font-medium text-slate-500">Fecha</span>
+                    <input type="date" value={paymentDate} onChange={(event) => setPaymentDate(event.target.value)} className="h-11 w-full min-w-0 rounded-xl border border-slate-200 px-2 text-sm dark:border-slate-700 dark:bg-slate-950 sm:h-9 sm:text-[11px]" />
+                  </label>
+                ) : null}
+                {selectedMethod?.requiereHoraPago ? (
+                  <label className="min-w-0 space-y-1">
+                    <span className="block text-[10px] font-medium text-slate-500">Hora</span>
+                    <input type="time" value={paymentTime} onChange={(event) => setPaymentTime(event.target.value)} className="h-11 w-full min-w-0 rounded-xl border border-slate-200 px-2 text-sm dark:border-slate-700 dark:bg-slate-950 sm:h-9 sm:text-[11px]" />
+                  </label>
+                ) : null}
+                {selectedMethod?.requiereHoraPago ? (
+                  <div className="space-y-1">
+                    <span className="block text-[10px] font-medium text-transparent" aria-hidden="true">Periodo</span>
+                    <span className="flex h-11 min-w-11 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 px-2 text-xs font-bold text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 sm:h-9">
+                      {paymentTime && Number(paymentTime.slice(0, 2)) >= 12 ? "PM" : "AM"}
+                    </span>
+                  </div>
+                ) : null}
+              </div>
+            </div>
           ) : null}
         </div>
       ) : null}

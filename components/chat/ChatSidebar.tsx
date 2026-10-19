@@ -69,6 +69,8 @@ interface ChatSidebarProps {
   onSaleCompleted?: () => void
   onClientUpdated?: () => void
   isAdmin?: boolean
+  activePanel?: "agent" | "sale"
+  onActivePanelChange?: (panel: "agent" | "sale") => void
 }
 
 const emptyRegisterForm = {
@@ -96,9 +98,9 @@ async function readError(response: Response, fallback: string) {
   return data?.message || data?.detail || data?.error || fallback
 }
 
-export function ChatSidebar({ conversationId, clientPhone, contactName, onClose, onSaleCompleted, onClientUpdated, isAdmin = false }: ChatSidebarProps) {
+export function ChatSidebar({ conversationId, clientPhone, contactName, onClose, onSaleCompleted, onClientUpdated, isAdmin = false, activePanel: controlledPanel, onActivePanelChange }: ChatSidebarProps) {
   const router = useRouter()
-  const [activePanel, setActivePanel] = useState<"agent" | "sale">("agent")
+  const [internalPanel, setInternalPanel] = useState<"agent" | "sale">("sale")
   const [context, setContext] = useState<QuickSaleContext | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -114,6 +116,11 @@ export function ChatSidebar({ conversationId, clientPhone, contactName, onClose,
   const [isMobileDrawer, setIsMobileDrawer] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const selectedConversationRef = useRef(conversationId)
+  const activePanel = controlledPanel ?? internalPanel
+  const setActivePanel = (panel: "agent" | "sale") => {
+    setInternalPanel(panel)
+    onActivePanelChange?.(panel)
+  }
 
   const visibleContactPhone = normalizePeruvianMobile(context?.cliente?.telefono || context?.contactPhone || clientPhone)
   const visibleContactName = context?.cliente?.nombres || contactName || context?.contactName || visibleContactPhone || "Cliente sin registrar"
@@ -327,6 +334,7 @@ export function ChatSidebar({ conversationId, clientPhone, contactName, onClose,
     setSaleHasDraft(false)
     onClientUpdated?.()
     onSaleCompleted?.()
+    if (isMobileDrawer) onClose()
   }
 
   const registerClientForm = (

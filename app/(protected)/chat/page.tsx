@@ -2939,7 +2939,7 @@ export default function ChatPage() {
   };
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [sidebarPanel, setSidebarPanel] = useState<"agent" | "sale">("sale");
+  const [sidebarPanel, setSidebarPanel] = useState<"agent" | "sale" | "purchases">("sale");
   const openQuickSaleSidebar = () => {
     setSidebarPanel("sale");
     setIsSidebarOpen(true);

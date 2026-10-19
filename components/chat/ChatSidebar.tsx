@@ -9,6 +9,7 @@ import {
   ChevronRightIcon,
   ClipboardDocumentListIcon,
   MagnifyingGlassIcon,
+  ReceiptPercentIcon,
   ShoppingBagIcon,
   SparklesIcon,
   UserPlusIcon,
@@ -26,6 +27,9 @@ import { authFetch } from "@/lib/auth/auth-fetch"
 import { isValidPeruvianMobile, normalizePeruvianMobile } from "@/lib/crm/phone"
 import { CrmQuickSalePanelFlow } from "@/components/chat/CrmQuickSalePanelFlow"
 import { AgentConversationPanel } from "@/components/chat/AgentConversationPanel"
+import { CustomerPurchasesPanel } from "@/components/chat/CustomerPurchasesPanel"
+
+type ChatSidebarPanel = "agent" | "sale" | "purchases"
 
 type TipoDocumento = "SIN_DOC" | "DNI" | "RUC" | "CE"
 
@@ -69,8 +73,8 @@ interface ChatSidebarProps {
   onSaleCompleted?: () => void
   onClientUpdated?: () => void
   isAdmin?: boolean
-  activePanel?: "agent" | "sale"
-  onActivePanelChange?: (panel: "agent" | "sale") => void
+  activePanel?: ChatSidebarPanel
+  onActivePanelChange?: (panel: ChatSidebarPanel) => void
 }
 
 const emptyRegisterForm = {
@@ -100,7 +104,7 @@ async function readError(response: Response, fallback: string) {
 
 export function ChatSidebar({ conversationId, clientPhone, contactName, onClose, onSaleCompleted, onClientUpdated, isAdmin = false, activePanel: controlledPanel, onActivePanelChange }: ChatSidebarProps) {
   const router = useRouter()
-  const [internalPanel, setInternalPanel] = useState<"agent" | "sale">("sale")
+  const [internalPanel, setInternalPanel] = useState<ChatSidebarPanel>("sale")
   const [context, setContext] = useState<QuickSaleContext | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -114,10 +118,12 @@ export function ChatSidebar({ conversationId, clientPhone, contactName, onClose,
   const [registerForm, setRegisterForm] = useState(emptyRegisterForm)
   const [saving, setSaving] = useState(false)
   const [isMobileDrawer, setIsMobileDrawer] = useState(false)
+  const [purchasesRefreshKey, setPurchasesRefreshKey] = useState(0)
+  const [purchaseCount, setPurchaseCount] = useState(0)
   const abortRef = useRef<AbortController | null>(null)
   const selectedConversationRef = useRef(conversationId)
   const activePanel = controlledPanel ?? internalPanel
-  const setActivePanel = (panel: "agent" | "sale") => {
+  const setActivePanel = (panel: ChatSidebarPanel) => {
     setInternalPanel(panel)
     onActivePanelChange?.(panel)
   }
@@ -332,6 +338,7 @@ export function ChatSidebar({ conversationId, clientPhone, contactName, onClose,
   const handleSaleCompleted = (nextContext: QuickSaleContext) => {
     setContext(nextContext)
     setSaleHasDraft(false)
+    setPurchasesRefreshKey((current) => current + 1)
     onClientUpdated?.()
     onSaleCompleted?.()
     if (isMobileDrawer) onClose()
@@ -371,6 +378,15 @@ export function ChatSidebar({ conversationId, clientPhone, contactName, onClose,
           <ShoppingBagIcon className="h-3.5 w-3.5" />
           Venta rápida
         </button>
+        <button type="button" onClick={() => setActivePanel("purchases")} className={`flex flex-1 items-center justify-center gap-1 rounded-md px-1.5 py-1.5 text-[11px] font-semibold transition ${activePanel === "purchases" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+          <ReceiptPercentIcon className="h-3.5 w-3.5" />
+          Compras
+          {purchaseCount > 0 ? (
+            <span className="rounded-full bg-emerald-100 px-1 py-0.5 text-[8px] leading-none text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
+              {purchaseCount > 99 ? "99+" : purchaseCount}
+            </span>
+          ) : null}
+        </button>
         <button onClick={onClose} className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-background hover:text-foreground" aria-label="Cerrar panel">
           <XMarkIcon className="h-3.5 w-3.5" />
         </button>
@@ -378,6 +394,13 @@ export function ChatSidebar({ conversationId, clientPhone, contactName, onClose,
 
       {activePanel === "agent" ? (
         <AgentConversationPanel key={conversationId} conversationId={conversationId} isAdmin={isAdmin} />
+      ) : activePanel === "purchases" ? (
+        <CustomerPurchasesPanel
+          key={conversationId}
+          conversationId={conversationId}
+          refreshKey={purchasesRefreshKey}
+          onCountChange={setPurchaseCount}
+        />
       ) : (
         <>
       <div className="shrink-0 border-b border-border px-3 py-2.5">

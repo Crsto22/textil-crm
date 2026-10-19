@@ -189,8 +189,6 @@ function ReviewDialog({ sale, open, onOpenChange, onUpdated }: {
   const [filmReason, setFilmReason] = useState("")
   const [filmDecision, setFilmDecision] = useState<"ACCEPT" | "REJECT" | null>(null)
   const [showFilmReview, setShowFilmReview] = useState(false)
-  const [manualFilmLoading, setManualFilmLoading] = useState(false)
-  const [coveredBySaleId, setCoveredBySaleId] = useState("")
   const mediaUrl = useProtectedMedia(
     sale?.evidenceId ? `/api/crm/whatsapp/payment-evidences/${sale.evidenceId}/media` : undefined,
     open,
@@ -271,41 +269,10 @@ function ReviewDialog({ sale, open, onOpenChange, onUpdated }: {
     } finally { setFilmLoading(false) }
   }
 
-  const confirmFilmManually = async () => {
-    if (!sale?.filmAddonId || manualFilmLoading) return
-    const previousSale = coveredBySaleId.trim() ? Number(coveredBySaleId.trim()) : null
-    if (previousSale !== null && (!Number.isInteger(previousSale) || previousSale <= 0)) {
-      toast.error("Ingresa un número de pedido anterior válido")
-      return
-    }
-    if (!window.confirm("Confirmo que verifiqué el pago del film o que está cubierto por el pedido anterior indicado.")) return
-    setManualFilmLoading(true)
-    try {
-      const response = await authFetch(`/api/crm/whatsapp/film-addons/${sale.filmAddonId}/manual-confirm`, {
-        method: "POST",
-        body: JSON.stringify({ confirmedExternal: true, coveredBySaleId: previousSale }),
-      })
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null)
-        throw new Error(payload?.message || "No se pudo confirmar el film")
-      }
-      toast.success(previousSale ? "Film cubierto por el pedido anterior." : "Pago del film confirmado manualmente.")
-      onOpenChange(false)
-      onUpdated()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "No se pudo confirmar el film")
-    } finally { setManualFilmLoading(false) }
-  }
-
   const canReview = sale?.mainEvidenceStatus === "ACEPTABLE" && sale.saleStatus !== "ANULADA"
   const canReviewFilm = sale?.filmEvidence?.validationStatus === "ACEPTABLE" && sale.saleStatus !== "ANULADA"
   const filmRequiresReview = Boolean(canReviewFilm && !filmDecision)
   const hasFilmEvidence = Boolean(sale?.filmEvidence)
-  const unresolvedFilm = Boolean(sale?.filmAddonId && [
-    "AWAITING_PREVIOUS_ORDER_DECISION", "ADVISOR_REVIEW_REQUIRED", "AWAITING_PAYMENT",
-    "PAYMENT_OVERDUE", "PAYMENT_CONFIGURATION_REQUIRED",
-  ].includes(sale?.filmStatus || ""))
-  const canConfirmFilmManually = unresolvedFilm && !hasFilmEvidence
   return (
     <Dialog open={open} onOpenChange={(next) => {
       if (!loading && !filmLoading) onOpenChange(next)
@@ -317,7 +284,6 @@ function ReviewDialog({ sale, open, onOpenChange, onUpdated }: {
         setFilmReason("")
         setFilmDecision(null)
         setShowFilmReview(false)
-        setCoveredBySaleId("")
       }
     }}>
       <DialogContent className="max-h-[92dvh] overflow-y-auto p-0 sm:max-w-4xl" showCloseButton={!loading && !filmLoading}>
@@ -503,21 +469,6 @@ function ReviewDialog({ sale, open, onOpenChange, onUpdated }: {
                   Revisar comprobante del film
                 </Button>
               ) : null}
-            </div>
-          </div>
-        ) : null}
-        {canConfirmFilmManually ? (
-          <div className="border-t bg-amber-50/70 p-4 dark:bg-amber-500/5">
-            <div className="mx-auto max-w-2xl rounded-xl border border-amber-200 bg-background p-4 dark:border-amber-800">
-              <p className="font-semibold">Film pendiente sin comprobante</p>
-              <p className="mt-1 text-xs text-muted-foreground">Confirma únicamente después de verificar el pago. Si ya fue pagado para un envío conjunto, indica el pedido anterior y no se registrará otro cobro de S/2.</p>
-              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                <input value={coveredBySaleId} onChange={(event) => setCoveredBySaleId(event.target.value.replace(/\D/g, ""))}
-                  placeholder="Pedido anterior (opcional)" className="h-10 flex-1 rounded-lg border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-amber-500/30" />
-                <Button disabled={manualFilmLoading} onClick={() => void confirmFilmManually()}>
-                  {manualFilmLoading ? "Confirmando..." : "Confirmar pago del film"}
-                </Button>
-              </div>
             </div>
           </div>
         ) : null}

@@ -215,6 +215,7 @@ interface CrmRealtimeEvent {
     | "payment.evidence.processing" | "payment.evidence.updated" | "payment.request.updated" | "payment.request.completed"
     | "whatsapp.connection.updated";
   conversationId: number;
+  connectionId?: string;
   conversation?: CrmConversationResponse;
   message?: CrmMessageResponse | null;
   status?: string;
@@ -2049,7 +2050,7 @@ function SalesChatPage() {
 
   useEffect(() => {
     const controller = new AbortController();
-    void authFetch("/api/crm/whatsapp/status", {
+    void authFetch("/api/crm/whatsapp/connections/sales/status", {
       cache: "no-store",
       signal: controller.signal,
     })
@@ -2059,18 +2060,7 @@ function SalesChatPage() {
       })
       .catch(() => {
         if (!controller.signal.aborted) {
-          setWhatsappConnection({
-            clientId: "kiments-main",
-            status: "DISCONNECTED",
-            connectedNumber: null,
-            previousConnectedNumber: null,
-            phoneChanged: false,
-            changeAcknowledged: true,
-            operationsBlocked: true,
-            blockedReason: "WhatsApp esta desconectado. Ve a Conexiones para volver a vincularlo.",
-            disconnectedAt: null,
-            phoneChangedAt: null,
-          });
+          setWhatsappConnection(null);
         }
       });
     return () => controller.abort();
@@ -2450,6 +2440,7 @@ function SalesChatPage() {
 
   const applyRealtimeEvent = useCallback((event: CrmRealtimeEvent) => {
     if (event.type === "whatsapp.connection.updated" && event.connection) {
+      if ((event.connectionId || event.connection.clientId) !== "kiments-sales") return;
       setWhatsappConnection(event.connection);
       const conversationId = activeConversationIdRef.current;
       if (conversationId && !event.connection.phoneChanged) {

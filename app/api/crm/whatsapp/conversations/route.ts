@@ -8,5 +8,6 @@ export async function GET(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  return proxyWhatsappRequest(request, "/api/crm/whatsapp/conversations", "DELETE")
+  const query = request.nextUrl.searchParams.toString()
+  return proxyWhatsappRequest(request, `/api/crm/whatsapp/conversations${query ? `?${query}` : ""}`, "DELETE")
 }

@@ -1,24 +1,36 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Image from "next/image"
+import { useRouter } from "next/navigation"
 import {
   ArrowPathIcon,
   BanknotesIcon,
   BuildingStorefrontIcon,
   CheckCircleIcon,
+  ChatBubbleLeftRightIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  EyeIcon,
+  FunnelIcon,
+  HashtagIcon,
   MagnifyingGlassIcon,
   NoSymbolIcon,
+  PhotoIcon,
   ShieldCheckIcon,
 } from "@heroicons/react/24/outline"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { LoaderSpinner } from "@/components/ui/loader-spinner"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { authFetch } from "@/lib/auth/auth-fetch"
+import { useAuth } from "@/lib/auth/auth-context"
+import { isCrmAdmin, isWarehouseUser } from "@/lib/auth/roles"
 import { cn } from "@/lib/utils"
 
 type ReviewFilter = "ALL" | "PENDING" | "ACCEPTED" | "REJECTED"
@@ -29,6 +41,7 @@ interface SaleItem {
   unitPrice: number
   discount: number
   total: number
+  imageUrl?: string | null
 }
 
 interface CrmSale {
@@ -45,7 +58,10 @@ interface CrmSale {
   customerPhone: string | null
   conversationId: number | null
   whatsappPhone: string | null
-  source: "CRM" | "IA_KIMENTS"
+  source: "CRM" | "IA_KIMENTS" | "POS" | "WEB" | "ECOMMERCE" | string
+  createdByUserId: number | null
+  createdByName: string | null
+  shippingConversationId: number | null
   paymentRequestId: number | null
   paymentRequestStatus: string | null
   evidenceId: number | null
@@ -107,19 +123,19 @@ interface EvidenceDetail {
   warnings: string[]
 }
 
-const filters: Array<{ value: ReviewFilter; label: string }> = [
-  { value: "ALL", label: "Todas" },
-  { value: "PENDING", label: "Por validar" },
-  { value: "ACCEPTED", label: "Aceptadas" },
-  { value: "REJECTED", label: "Anuladas" },
-]
-
 function money(value: number | null | undefined) {
   return `S/ ${Number(value ?? 0).toFixed(2)}`
 }
 
 function dateTime(value: string | null | undefined) {
   return value ? new Date(value).toLocaleString("es-PE", { dateStyle: "short", timeStyle: "short" }) : "-"
+}
+
+function localDateValue(date: Date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
 }
 
 function reviewLabel(status: CrmSale["reviewStatus"]) {
@@ -492,14 +508,313 @@ function Info({ label, value }: { label: string; value: string }) {
   return <div className="rounded-lg border p-3"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 break-words font-semibold">{value}</p></div>
 }
 
+function DetailValue({ label, value }: { label: string; value: string }) {
+  return <div className="min-w-0 rounded-xl bg-muted/45 px-3 py-2.5"><p className="text-[11px] text-muted-foreground">{label}</p><p className="mt-0.5 break-words text-sm font-semibold">{value}</p></div>
+}
+
+function SaleDetailContent({ sale }: {
+  sale: CrmSale
+}) {
+  return (
+    <div className="space-y-4 px-4 pb-5">
+      <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-3">
+        <DetailValue label="Pedido" value={`#${sale.saleId}`} />
+        <DetailValue label="Fecha" value={dateTime(sale.createdAt)} />
+        <DetailValue label="Cliente" value={sale.customerName || "Cliente WhatsApp"} />
+        <DetailValue label="Celular" value={sale.customerPhone || sale.whatsappPhone || "-"} />
+        <DetailValue label="Origen" value={sale.source === "IA_KIMENTS" ? "IA Kiments" : sale.source} />
+        <DetailValue label="Creado por" value={sale.createdByName || "-"} />
+      </div>
+
+      {sale.deliveryMethod ? (
+        <div className={cn(
+          "flex items-start gap-3 rounded-2xl border p-4",
+          sale.deliveryMethod === "SHALOM"
+            ? "border-orange-200 bg-orange-50/70 dark:border-orange-500/25 dark:bg-orange-500/10"
+            : "border-sky-200 bg-sky-50/70 dark:border-sky-500/25 dark:bg-sky-500/10",
+        )}>
+          <span className={cn(
+            "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-background shadow-sm ring-1 ring-black/5 dark:ring-white/10",
+            sale.deliveryMethod === "SHALOM" ? "text-orange-700" : "text-sky-700",
+          )}>
+            {sale.deliveryMethod === "SHALOM" ? (
+              <Image src="/img/shalom-delivery.png" alt="Shalom" width={28} height={28} className="h-7 w-7 rounded-md object-cover" />
+            ) : (
+              <BuildingStorefrontIcon className="h-6 w-6" />
+            )}
+          </span>
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Modo de entrega</p>
+            <p className="mt-0.5 font-bold">{deliveryLabel(sale.deliveryMethod)}</p>
+            {sale.deliveryMethod === "SHALOM" && sale.shalomAgency ? (
+              <p className="mt-1 text-sm text-muted-foreground">Agencia: {sale.shalomAgency}</p>
+            ) : null}
+            {sale.deliveryMethod === "SHALOM" && sale.shalomAgencyAddress ? (
+              <p className="mt-0.5 text-sm text-muted-foreground">{sale.shalomAgencyAddress}</p>
+            ) : null}
+            {sale.deliveryMethod === "PICKUP" && sale.branch ? (
+              <p className="mt-1 text-sm text-muted-foreground">Sucursal: {sale.branch}</p>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      <div className="overflow-hidden rounded-2xl bg-muted/30">
+        <div className="px-3 pb-1 pt-3 text-sm font-semibold">Productos</div>
+        <div className="divide-y divide-border/50">
+          {sale.items.map((item, index) => (
+            <div key={`${item.description}-${index}`} className="grid grid-cols-[3.5rem_1fr_auto] items-center gap-3 px-3 py-3 text-sm">
+              {item.imageUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={item.imageUrl} alt={item.description || "Producto"} className="h-14 w-14 rounded-xl bg-background object-cover" />
+              ) : <span className="flex h-14 w-14 items-center justify-center rounded-xl bg-background text-muted-foreground"><PhotoIcon className="h-6 w-6" /></span>}
+              <div className="min-w-0">
+                <p className="font-medium">{item.description}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">{item.quantity} × {money(item.unitPrice)}{item.discount ? ` · Descuento ${money(item.discount)}` : ""}</p>
+              </div>
+              <p className="font-bold tabular-nums">{money(item.total)}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {sale.cancellationReason ? <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">{sale.cancellationReason}</div> : null}
+
+      <div className="flex items-center justify-between gap-3 rounded-2xl bg-emerald-50 p-4 dark:bg-emerald-500/10">
+        <span className="text-sm font-semibold text-emerald-800 dark:text-emerald-300">Total de la venta</span>
+        <span className="text-2xl font-black text-emerald-900 dark:text-emerald-200">{money(sale.total)}</span>
+      </div>
+    </div>
+  )
+}
+
+function SaleDetail({ sale, open, onOpenChange, canChat, openingChat, onChat }: {
+  sale: CrmSale | null
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  canChat: boolean
+  openingChat: boolean
+  onChat: () => void
+}) {
+  const [desktop, setDesktop] = useState(false)
+
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 640px)")
+    const update = () => setDesktop(media.matches)
+    update()
+    media.addEventListener("change", update)
+    return () => media.removeEventListener("change", update)
+  }, [])
+
+  if (!sale) return null
+
+  const header = (
+    <div className="flex items-center gap-3">
+      <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300"><EyeIcon className="h-5 w-5" /></span>
+      <div><p className="font-bold">Detalle de la venta</p><p className="text-xs text-muted-foreground">Pedido #{sale.saleId}</p></div>
+    </div>
+  )
+  const chatAction = canChat ? (
+    <div className="shrink-0 border-t border-border/60 bg-background/95 p-3 backdrop-blur">
+      <Button className="w-full bg-emerald-600 text-white hover:bg-emerald-700" disabled={!(sale.whatsappPhone || sale.customerPhone) || openingChat} onClick={onChat}>
+        <ChatBubbleLeftRightIcon className="h-5 w-5" />
+        {openingChat ? "Abriendo chat..." : "Chatear con el cliente"}
+      </Button>
+    </div>
+  ) : null
+
+  if (desktop) return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="flex max-h-[90dvh] flex-col overflow-hidden p-0 sm:max-w-3xl">
+        <DialogHeader className="shrink-0 border-b border-border/60 px-5 py-4"><DialogTitle asChild>{header}</DialogTitle></DialogHeader>
+        <div className="min-h-0 flex-1 overflow-y-auto pt-4"><SaleDetailContent sale={sale} /></div>
+        {chatAction}
+      </DialogContent>
+    </Dialog>
+  )
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent side="bottom" className="flex max-h-[92dvh] flex-col overflow-hidden rounded-t-3xl p-0 pb-[env(safe-area-inset-bottom)]">
+        <SheetHeader className="shrink-0 border-b border-border/60 bg-background px-4 py-4 pr-12"><SheetTitle asChild>{header}</SheetTitle></SheetHeader>
+        <div className="min-h-0 flex-1 overflow-y-auto pt-4"><SaleDetailContent sale={sale} /></div>
+        {chatAction}
+      </SheetContent>
+    </Sheet>
+  )
+}
+
+function SearchSale({ open, onOpenChange, onFound }: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onFound: (sale: CrmSale) => void
+}) {
+  const [desktop, setDesktop] = useState(false)
+  const [saleId, setSaleId] = useState("")
+  const [searching, setSearching] = useState(false)
+  const [error, setError] = useState("")
+
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 640px)")
+    const update = () => setDesktop(media.matches)
+    update()
+    media.addEventListener("change", update)
+    return () => media.removeEventListener("change", update)
+  }, [])
+
+  const changeOpen = (next: boolean) => {
+    if (searching) return
+    onOpenChange(next)
+    if (!next) {
+      setSaleId("")
+      setError("")
+    }
+  }
+
+  const search = async () => {
+    const normalizedId = saleId.trim()
+    if (!/^\d+$/.test(normalizedId)) {
+      setError("Ingresa un número de pedido válido")
+      return
+    }
+    setSearching(true)
+    setError("")
+    try {
+      const params = new URLSearchParams({
+        q: normalizedId,
+        reviewStatus: "ALL",
+        receiptType: "ALL",
+        saleStatus: "ALL",
+        period: "ALL",
+        source: "ALL",
+        page: "0",
+        size: "20",
+      })
+      const response = await authFetch(`/api/crm/whatsapp/sales?${params}`, { cache: "no-store" })
+      if (!response.ok) throw new Error("No se pudo buscar el pedido")
+      const result = await response.json() as SalesPage
+      const sale = result.content.find((item) => item.saleId === Number(normalizedId))
+      if (!sale) {
+        setError(`No se encontró el pedido #${normalizedId}`)
+        return
+      }
+      onOpenChange(false)
+      setSaleId("")
+      onFound(sale)
+    } catch (searchError) {
+      setError(searchError instanceof Error ? searchError.message : "No se pudo buscar el pedido")
+    } finally {
+      setSearching(false)
+    }
+  }
+
+  const form = (
+    <form className="space-y-4 px-5 pb-5" onSubmit={(event) => { event.preventDefault(); void search() }}>
+      <div className="space-y-2">
+        <Label htmlFor="search-sale-id" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Número de pedido</Label>
+        <div className="relative">
+          <HashtagIcon className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
+          <Input id="search-sale-id" inputMode="numeric" pattern="[0-9]*" autoComplete="off" autoFocus={desktop} value={saleId} onChange={(event) => { setSaleId(event.target.value.replace(/\D/g, "")); setError("") }} placeholder="Ejemplo: 8645" className="h-14 rounded-xl pl-11 text-center text-xl font-bold tracking-widest" />
+        </div>
+        {error ? <p className="text-sm font-medium text-red-600 dark:text-red-400">{error}</p> : null}
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <Button type="button" variant="outline" onClick={() => changeOpen(false)} disabled={searching}>Cancelar</Button>
+        <Button type="submit" className="bg-blue-600 text-white hover:bg-blue-700" disabled={searching || !saleId}>
+          {searching ? <ArrowPathIcon className="h-4 w-4 animate-spin" /> : <MagnifyingGlassIcon className="h-4 w-4" />}
+          {searching ? "Buscando..." : "Buscar pedido"}
+        </Button>
+      </div>
+    </form>
+  )
+
+  const heading = <div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-600 text-white"><MagnifyingGlassIcon className="h-5 w-5" /></span><span>Buscar pedido</span></div>
+
+  if (desktop) return (
+    <Dialog open={open} onOpenChange={changeOpen}>
+      <DialogContent className="p-0 sm:max-w-md">
+        <DialogHeader className="px-5 pb-3 pt-5"><DialogTitle asChild>{heading}</DialogTitle></DialogHeader>
+        {form}
+      </DialogContent>
+    </Dialog>
+  )
+
+  return (
+    <Sheet open={open} onOpenChange={changeOpen}>
+      <SheetContent side="bottom" className="rounded-t-3xl p-0 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <SheetHeader className="px-5 pb-3 pt-5 pr-12"><SheetTitle asChild>{heading}</SheetTitle></SheetHeader>
+        {form}
+      </SheetContent>
+    </Sheet>
+  )
+}
+
 export default function CrmSalesPage() {
+  const router = useRouter()
+  const { user } = useAuth()
+  const isAdmin = isCrmAdmin(user?.rol)
+  const isWarehouse = isWarehouseUser(user?.rol)
+  const canChat = isAdmin || isWarehouse
+  const showActions = true
   const [data, setData] = useState<SalesPage>({ content: [], totalElements: 0, page: 0, size: 20, totalPages: 0 })
   const [query, setQuery] = useState("")
   const [debouncedQuery, setDebouncedQuery] = useState("")
-  const [filter, setFilter] = useState<ReviewFilter>("ALL")
+  const [filter] = useState<ReviewFilter>("ALL")
+  const [receiptType, setReceiptType] = useState("ALL")
+  const [saleStatus, setSaleStatus] = useState("ALL")
+  const [period, setPeriod] = useState("TODAY")
+  const [fromDate, setFromDate] = useState("")
+  const [toDate, setToDate] = useState("")
+  const [quickDateSelected, setQuickDateSelected] = useState(false)
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const [source, setSource] = useState("ALL")
+  const [order, setOrder] = useState<"DESC" | "ASC">("DESC")
+  const [openingChatId, setOpeningChatId] = useState<number | null>(null)
   const [page, setPage] = useState(0)
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [selected, setSelected] = useState<CrmSale | null>(null)
+  const [detailSale, setDetailSale] = useState<CrmSale | null>(null)
+  const [searchSaleOpen, setSearchSaleOpen] = useState(false)
+  const daysScrollerRef = useRef<HTMLDivElement>(null)
+  const loadMoreRef = useRef<HTMLDivElement>(null)
+  const upcomingDays = useMemo(() => {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    return Array.from({ length: 30 }, (_, index) => {
+      const daysAgo = 29 - index
+      const date = new Date(today)
+      date.setDate(today.getDate() - daysAgo)
+      return {
+        value: localDateValue(date),
+        dayNumber: date.getDate(),
+        weekday: new Intl.DateTimeFormat("es-PE", { weekday: "short" }).format(date).replace(".", ""),
+        month: new Intl.DateTimeFormat("es-PE", { month: "short" }).format(date).replace(".", ""),
+        relativeLabel: daysAgo === 0 ? "Hoy" : daysAgo === 1 ? "Ayer" : null,
+      }
+    })
+  }, [])
+
+  useEffect(() => {
+    const scroller = daysScrollerRef.current
+    if (!scroller) return
+    scroller.scrollLeft = scroller.scrollWidth
+  }, [upcomingDays])
+
+  const selectDay = (date: string) => {
+    setQuickDateSelected(true)
+    setPeriod("CUSTOM")
+    setFromDate(date)
+    setToDate(date)
+    setPage(0)
+  }
+
+  const scrollDays = (direction: -1 | 1) => {
+    daysScrollerRef.current?.scrollBy({
+      left: direction * Math.max(daysScrollerRef.current.clientWidth * 0.8, 320),
+      behavior: "smooth",
+    })
+  }
 
   useEffect(() => {
     const timer = window.setTimeout(() => { setDebouncedQuery(query.trim()); setPage(0) }, 300)
@@ -507,23 +822,72 @@ export default function CrmSalesPage() {
   }, [query])
 
   const load = useCallback(async () => {
-    setLoading(true)
+    const appendOnMobile = page > 0 && window.innerWidth < 1024
+    if (appendOnMobile) setLoadingMore(true)
+    else setLoading(true)
     try {
-      const params = new URLSearchParams({ q: debouncedQuery, reviewStatus: filter, page: String(page), size: "20" })
+      const params = new URLSearchParams({ q: debouncedQuery, reviewStatus: filter, receiptType, saleStatus, period, source, order, page: String(page), size: "20" })
+      if (fromDate) params.set("from", fromDate)
+      if (toDate) params.set("to", toDate)
       const response = await authFetch(`/api/crm/whatsapp/sales?${params}`, { cache: "no-store" })
       if (!response.ok) throw new Error("No se pudieron cargar las ventas del CRM")
-      setData(await response.json() as SalesPage)
+      const nextData = await response.json() as SalesPage
+      setData((current) => appendOnMobile
+        ? {
+            ...nextData,
+            content: [
+              ...current.content,
+              ...nextData.content.filter((nextSale) => !current.content.some((sale) => sale.saleId === nextSale.saleId)),
+            ],
+          }
+        : nextData)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No se pudieron cargar las ventas")
     } finally {
-      setLoading(false)
+      if (appendOnMobile) setLoadingMore(false)
+      else setLoading(false)
     }
-  }, [debouncedQuery, filter, page])
+  }, [debouncedQuery, filter, receiptType, saleStatus, period, source, order, fromDate, toDate, page])
+
+  const openShippingChat = async (sale: CrmSale) => {
+    const contactPhone = sale.whatsappPhone || sale.customerPhone
+    if (!contactPhone || openingChatId !== null) return
+    setOpeningChatId(sale.saleId)
+    try {
+      let conversationId = sale.shippingConversationId
+      if (!conversationId) {
+        const response = await authFetch(`/api/crm/warehouse/orders/${sale.saleId}/shipping-conversation`, { method: "POST" })
+        const payload = await response.json().catch(() => null) as { conversationId?: number; message?: string } | null
+        if (!response.ok || !payload?.conversationId) throw new Error(payload?.message || "No se pudo abrir el chat de Envíos")
+        conversationId = payload.conversationId
+      }
+      router.push(`/chat?area=shipping&conversationId=${conversationId}`)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo abrir el chat de Envíos")
+    } finally {
+      setOpeningChatId(null)
+    }
+  }
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0)
     return () => window.clearTimeout(timer)
   }, [load])
+
+  useEffect(() => {
+    const target = loadMoreRef.current
+    if (!target || loading || loadingMore || page + 1 >= data.totalPages) return
+
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting && window.innerWidth < 1024) {
+        setLoadingMore(true)
+        setPage((current) => current + 1)
+      }
+    }, { rootMargin: "200px 0px" })
+
+    observer.observe(target)
+    return () => observer.disconnect()
+  }, [data.totalPages, loading, loadingMore, page])
   const statusClass = (sale: CrmSale) => cn(
     "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold",
     sale.reviewStatus === "PENDING" && "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300",
@@ -541,42 +905,266 @@ export default function CrmSalesPage() {
   )
 
   return (
-    <main className="min-h-full bg-slate-50/70 p-2 dark:bg-transparent sm:p-3">
-      <div className="w-full space-y-3">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="relative w-full max-w-md">
-            <MagnifyingGlassIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Buscar nota, cliente, celular u operación"
-              className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-slate-700 dark:bg-slate-900"
-            />
-          </div>
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 lg:pb-0">
-            {filters.map((item) => (
-              <button
-                key={item.value}
-                type="button"
-                onClick={() => { setFilter(item.value); setPage(0) }}
-                className={cn(
-                  "shrink-0 rounded-full border px-3 py-2 text-xs font-semibold transition-colors",
-                  filter === item.value
-                    ? "border-emerald-600 bg-emerald-600 text-white"
-                    : "border-slate-200 bg-white hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800",
-                )}
-              >
-                {item.label}
-              </button>
-            ))}
-            <Button size="sm" variant="outline" className="rounded-xl" onClick={() => void load()} disabled={loading}>
+    <main className="min-h-full bg-background sm:bg-slate-50/70 sm:p-3 dark:sm:bg-transparent">
+      <div className="w-full sm:space-y-3">
+        <section className="border-b border-border bg-background px-3 pb-3 pt-2 sm:rounded-2xl sm:border sm:border-slate-100 sm:p-4 sm:shadow-sm dark:sm:border-slate-700/60 dark:sm:bg-slate-800/80">
+          {canChat ? <div className="mb-3 hidden justify-end sm:flex">
+            <Button type="button" className="bg-blue-600 text-white hover:bg-blue-700" onClick={() => setSearchSaleOpen(true)}>
+              <MagnifyingGlassIcon className="h-4 w-4" />
+              Buscar pedido
+            </Button>
+          </div> : null}
+          <div className="mb-3 flex items-center gap-2 sm:hidden">
+            <div className="relative min-w-0 flex-1">
+              <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                id="sales-search-mobile"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Buscar comprobante"
+                className="h-10 pl-9"
+              />
+            </div>
+            {canChat ? <Button type="button" variant="outline" size="icon" className="h-10 w-10 shrink-0 border-blue-200 text-blue-700" onClick={() => setSearchSaleOpen(true)} aria-label="Buscar pedido" title="Buscar pedido">
+              <HashtagIcon className="h-4 w-4" />
+            </Button> : null}
+            <Sheet open={filtersOpen} onOpenChange={setFiltersOpen}>
+              <Button type="button" variant="outline" size="icon" className="h-10 w-10 shrink-0" onClick={() => setFiltersOpen(true)} aria-label="Abrir filtros de ventas">
+                <FunnelIcon className="h-4 w-4" />
+              </Button>
+              <SheetContent side="bottom" className="max-h-[85dvh] overflow-y-auto rounded-t-3xl px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-5">
+                <SheetHeader className="mb-4 pr-8">
+                  <SheetTitle>Filtros</SheetTitle>
+                </SheetHeader>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Tipo</Label>
+                    <Select value={receiptType} onValueChange={(value) => { setReceiptType(value); setPage(0) }}>
+                      <SelectTrigger aria-label="Tipo de comprobante"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ALL">Todos</SelectItem>
+                        <SelectItem value="NOTA DE VENTA">Nota de venta</SelectItem>
+                        <SelectItem value="BOLETA">Boleta</SelectItem>
+                        <SelectItem value="FACTURA">Factura</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Estado</Label>
+                    <Select value={saleStatus} onValueChange={(value) => { setSaleStatus(value); setPage(0) }}>
+                      <SelectTrigger aria-label="Estado de la venta"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ALL">Todos</SelectItem>
+                        <SelectItem value="EMITIDA">Emitida</SelectItem>
+                        <SelectItem value="ANULADA">Anulada</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="col-span-2 space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Período</Label>
+                    <Select value={quickDateSelected ? "QUICK_DATE" : period} onValueChange={(value) => { setQuickDateSelected(false); setPeriod(value); setFromDate(""); setToDate(""); setPage(0) }}>
+                      <SelectTrigger aria-label="Período"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {quickDateSelected ? <SelectItem value="QUICK_DATE">Día seleccionado</SelectItem> : null}
+                        <SelectItem value="TODAY">Hoy</SelectItem>
+                        <SelectItem value="WEEK">Esta semana</SelectItem>
+                        <SelectItem value="MONTH">Este mes</SelectItem>
+                        <SelectItem value="ALL">Todo</SelectItem>
+                        <SelectItem value="CUSTOM">Rango de fechas</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {period === "CUSTOM" && !quickDateSelected ? <>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="sales-from-mobile" className="text-xs text-muted-foreground">Desde</Label>
+                      <Input id="sales-from-mobile" type="date" value={fromDate} onChange={(event) => { setFromDate(event.target.value); setPage(0) }} className="h-10" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="sales-to-mobile" className="text-xs text-muted-foreground">Hasta</Label>
+                      <Input id="sales-to-mobile" type="date" value={toDate} min={fromDate} onChange={(event) => { setToDate(event.target.value); setPage(0) }} className="h-10" />
+                    </div>
+                  </> : null}
+                  <Button type="button" className="col-span-2 mt-1" onClick={() => setFiltersOpen(false)}>Ver resultados</Button>
+                </div>
+              </SheetContent>
+            </Sheet>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="h-10 w-10 shrink-0"
+              onClick={() => { if (page === 0) void load(); else setPage(0) }}
+              disabled={loading}
+              aria-label="Actualizar ventas"
+              title="Actualizar ventas"
+            >
               <ArrowPathIcon className={cn("h-4 w-4", loading && "animate-spin")} />
-              Actualizar
             </Button>
           </div>
-        </div>
 
-        <section className="space-y-3 overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm dark:border-slate-700/60 dark:bg-slate-800/80 sm:p-3">
+          <div className="mb-3 grid grid-cols-2 rounded-xl border border-border bg-muted/40 p-1 sm:hidden" aria-label="Orden de los pedidos">
+            <Button
+              type="button"
+              size="sm"
+              variant={order === "DESC" ? "default" : "ghost"}
+              className="rounded-lg"
+              aria-pressed={order === "DESC"}
+              onClick={() => { setOrder("DESC"); setPage(0) }}
+            >
+              Últimos pedidos
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={order === "ASC" ? "default" : "ghost"}
+              className="rounded-lg"
+              aria-pressed={order === "ASC"}
+              onClick={() => { setOrder("ASC"); setPage(0) }}
+            >
+              Primeros pedidos
+            </Button>
+          </div>
+
+          <div className="hidden grid-cols-2 gap-2.5 sm:grid sm:gap-3 xl:grid-cols-12">
+            <div className="col-span-2 space-y-1.5 xl:col-span-4">
+              <Label htmlFor="sales-search" className="text-xs text-muted-foreground">Comprobante</Label>
+              <div className="relative">
+                <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input id="sales-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar por número de comprobante" className="h-10 pl-9" />
+              </div>
+            </div>
+
+            <div className="space-y-1.5 xl:col-span-2">
+              <Label className="text-xs text-muted-foreground">Tipo</Label>
+              <Select value={receiptType} onValueChange={(value) => { setReceiptType(value); setPage(0) }}>
+                <SelectTrigger aria-label="Tipo de comprobante"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">Todos</SelectItem>
+                  <SelectItem value="NOTA DE VENTA">Nota de venta</SelectItem>
+                  <SelectItem value="BOLETA">Boleta</SelectItem>
+                  <SelectItem value="FACTURA">Factura</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5 xl:col-span-2">
+              <Label className="text-xs text-muted-foreground">Estado</Label>
+              <Select value={saleStatus} onValueChange={(value) => { setSaleStatus(value); setPage(0) }}>
+                <SelectTrigger aria-label="Estado de la venta"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">Todos</SelectItem>
+                  <SelectItem value="EMITIDA">Emitida</SelectItem>
+                  <SelectItem value="ANULADA">Anulada</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5 xl:col-span-2">
+              <Label className="text-xs text-muted-foreground">Período</Label>
+              <Select value={quickDateSelected ? "QUICK_DATE" : period} onValueChange={(value) => { setQuickDateSelected(false); setPeriod(value); setFromDate(""); setToDate(""); setPage(0) }}>
+                <SelectTrigger aria-label="Período"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {quickDateSelected ? <SelectItem value="QUICK_DATE">Día seleccionado</SelectItem> : null}
+                  <SelectItem value="TODAY">Hoy</SelectItem>
+                  <SelectItem value="WEEK">Esta semana</SelectItem>
+                  <SelectItem value="MONTH">Este mes</SelectItem>
+                  <SelectItem value="ALL">Todo</SelectItem>
+                  <SelectItem value="CUSTOM">Rango de fechas</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {isAdmin ? <div className="space-y-1.5 xl:col-span-2">
+              <Label className="text-xs text-muted-foreground">Origen</Label>
+              <Select value={source} onValueChange={(value) => { setSource(value); setPage(0) }}>
+                <SelectTrigger aria-label="Origen de la venta"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">Todos</SelectItem>
+                  <SelectItem value="IA_KIMENTS">IA Kimets</SelectItem>
+                </SelectContent>
+              </Select>
+            </div> : null}
+
+            {period === "CUSTOM" && !quickDateSelected ? <>
+              <div className="space-y-1.5 xl:col-span-2">
+                <Label htmlFor="sales-from" className="text-xs text-muted-foreground">Desde</Label>
+                <Input id="sales-from" type="date" value={fromDate} onChange={(event) => { setFromDate(event.target.value); setPage(0) }} className="h-10" />
+              </div>
+              <div className="space-y-1.5 xl:col-span-2">
+                <Label htmlFor="sales-to" className="text-xs text-muted-foreground">Hasta</Label>
+                <Input id="sales-to" type="date" value={toDate} min={fromDate} onChange={(event) => { setToDate(event.target.value); setPage(0) }} className="h-10" />
+              </div>
+            </> : null}
+          </div>
+
+          <div className="mt-3 hidden items-center justify-end gap-2 sm:flex">
+            <span className="text-xs font-medium text-muted-foreground">Ordenar:</span>
+            <div className="inline-flex rounded-xl border border-border bg-muted/40 p-1" aria-label="Orden de los pedidos">
+              <Button
+                type="button"
+                size="sm"
+                variant={order === "DESC" ? "default" : "ghost"}
+                className="rounded-lg"
+                aria-pressed={order === "DESC"}
+                onClick={() => { setOrder("DESC"); setPage(0) }}
+              >
+                Últimos pedidos
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={order === "ASC" ? "default" : "ghost"}
+                className="rounded-lg"
+                aria-pressed={order === "ASC"}
+                onClick={() => { setOrder("ASC"); setPage(0) }}
+              >
+                Primeros pedidos
+              </Button>
+            </div>
+          </div>
+
+          <div className="mt-4 border-t border-slate-100 pt-3 dark:border-slate-700/60">
+            <div className="flex items-center gap-2">
+              <Button type="button" variant="outline" size="icon-sm" className="hidden shrink-0 rounded-full sm:inline-flex" onClick={() => scrollDays(-1)} aria-label="Ver días anteriores">
+                <ChevronLeftIcon className="h-4 w-4" />
+              </Button>
+            <div
+              ref={daysScrollerRef}
+              className="scrollbar-hide -mx-3 flex min-w-0 flex-1 snap-x snap-mandatory gap-2 overflow-x-auto overscroll-x-contain px-3 pb-1 sm:mx-0 sm:px-0 sm:pb-2 sm:[scrollbar-width:thin]"
+              aria-label="Fechas disponibles para filtrar ventas"
+            >
+              {upcomingDays.map((day) => {
+                const active = (period === "TODAY" && day.value === upcomingDays.at(-1)?.value)
+                  || (period === "CUSTOM" && fromDate === day.value && toDate === day.value)
+                return (
+                  <button
+                    key={day.value}
+                    type="button"
+                    onClick={() => selectDay(day.value)}
+                    aria-pressed={active}
+                    aria-label={`Filtrar ventas del ${day.value}`}
+                    className={cn(
+                      "min-w-[64px] snap-start rounded-xl border px-1.5 py-2 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:min-w-[82px] sm:px-2 xl:min-w-0 xl:basis-[calc((100%-4.5rem)/10)] xl:shrink-0",
+                      active
+                        ? "border-blue-600 bg-blue-600 text-white shadow-sm dark:border-blue-500 dark:bg-blue-500"
+                        : "border-slate-200 bg-white text-foreground hover:border-blue-300 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-900/40 dark:hover:border-blue-700 dark:hover:bg-blue-950/30",
+                    )}
+                  >
+                    <span className={cn("block truncate text-[10px] font-semibold uppercase", active ? "text-blue-100" : "text-muted-foreground")}>
+                      {day.relativeLabel ?? day.weekday}
+                    </span>
+                    <span className="block text-lg font-bold leading-5">{day.dayNumber}</span>
+                    <span className={cn("block text-[10px] uppercase", active ? "text-blue-100" : "text-muted-foreground")}>{day.month}</span>
+                  </button>
+                )
+              })}
+            </div>
+              <Button type="button" variant="outline" size="icon-sm" className="hidden shrink-0 rounded-full sm:inline-flex" onClick={() => scrollDays(1)} aria-label="Volver a días más recientes">
+                <ChevronRightIcon className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+
+        </section>
+
+        <section className="overflow-hidden bg-background sm:space-y-3 sm:rounded-2xl sm:border sm:border-slate-100 sm:bg-white sm:p-3 sm:shadow-sm dark:sm:border-slate-700/60 dark:sm:bg-slate-800/80">
           <div className="hidden overflow-x-auto lg:block">
             <table className="w-full min-w-[1050px] text-sm">
               <thead>
@@ -585,20 +1173,18 @@ export default function CrmSalesPage() {
                   <th className="px-3 py-3 text-left">Fecha</th>
                   <th className="px-3 py-3 text-left">Comprobante</th>
                   <th className="px-3 py-3 text-left">Cliente</th>
-                  <th className="px-3 py-3 text-left">Sucursal</th>
                   <th className="px-3 py-3 text-left">Entrega</th>
                   <th className="px-3 py-3 text-center">Items</th>
-                  <th className="px-3 py-3 text-left">Pago</th>
                   <th className="px-3 py-3 text-right">Total</th>
                   <th className="px-3 py-3 text-center">Estado</th>
-                  <th className="px-3 py-3 text-center">Acción</th>
+                  {showActions ? <th className="px-3 py-3 text-center">Acción</th> : null}
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={11} className="px-3 py-14 text-center"><LoaderSpinner text="Cargando ventas..." /></td></tr>
+                  <tr><td colSpan={showActions ? 9 : 8} className="px-3 py-14 text-center"><LoaderSpinner text="Cargando ventas..." /></td></tr>
                 ) : data.content.length === 0 ? (
-                  <tr><td colSpan={11} className="px-3 py-14 text-center text-sm text-muted-foreground">Sin ventas para los filtros seleccionados</td></tr>
+                  <tr><td colSpan={showActions ? 9 : 8} className="px-3 py-14 text-center text-sm text-muted-foreground">Sin ventas para los filtros seleccionados</td></tr>
                 ) : data.content.map((sale) => (
                   <tr key={sale.saleId} className="border-b last:border-0 hover:bg-muted/20">
                     <td className="px-3 py-3 font-semibold">#{sale.saleId}</td>
@@ -607,7 +1193,7 @@ export default function CrmSalesPage() {
                       <div className="flex flex-col">
                         <span className="font-semibold">{sale.receiptType}</span>
                         <span className="text-xs text-muted-foreground">{sale.number}</span>
-                        <span className={sourceClass(sale)}>{sale.source === "IA_KIMENTS" ? "IA Kiments" : "CRM"}</span>
+                        <span className={sourceClass(sale)}>{sale.source === "IA_KIMENTS" ? "IA Kiments" : sale.source}</span>
                       </div>
                     </td>
                     <td className="px-3 py-3">
@@ -616,7 +1202,6 @@ export default function CrmSalesPage() {
                         <span className="text-[11px] text-muted-foreground">{sale.customerPhone || sale.whatsappPhone || "-"}</span>
                       </div>
                     </td>
-                    <td className="px-3 py-3 font-medium">{sale.branch || "Sin sucursal"}</td>
                     <td className="px-3 py-3">
                       <div className="flex flex-col items-start gap-1">
                       <span className={cn(
@@ -640,12 +1225,6 @@ export default function CrmSalesPage() {
                       </div>
                     </td>
                     <td className="px-3 py-3 text-center font-semibold">{sale.items.length}</td>
-                    <td className="px-3 py-3">
-                      <div className="flex flex-col">
-                        <span className="font-medium">{sale.paymentMethod || sale.detectedProvider || "-"}</span>
-                        <span className="text-[11px] text-muted-foreground">{sale.operationCode || "Sin código"}</span>
-                      </div>
-                    </td>
                     <td className="px-3 py-3 text-right font-semibold">{money(sale.total)}</td>
                     <td className="px-3 py-3 text-center">
                       <span className={statusClass(sale)}>
@@ -654,11 +1233,11 @@ export default function CrmSalesPage() {
                         {reviewLabel(sale.reviewStatus)}
                       </span>
                     </td>
-                    <td className="px-3 py-3 text-center">
-                      <Button size="sm" variant={sale.reviewStatus === "PENDING" ? "default" : "outline"} disabled={!sale.evidenceId && !sale.filmAddonId} onClick={() => setSelected(sale)}>
-                        {sale.reviewStatus === "PENDING" ? "Validar pago" : "Ver detalle"}
-                      </Button>
-                    </td>
+                    {showActions ? <td className="px-3 py-3 text-center"><div className="flex justify-center gap-2">
+                      <Button size="icon-sm" className="bg-blue-600 text-white shadow-sm hover:bg-blue-700" title="Ver detalle" aria-label="Ver detalle" onClick={() => setDetailSale(sale)}><EyeIcon /></Button>
+                      {isAdmin && sale.source === "IA_KIMENTS" && sale.reviewStatus === "PENDING" ? <Button size="icon-sm" className="bg-amber-500 text-white shadow-sm hover:bg-amber-600" title="Validar pago" aria-label="Validar pago" onClick={() => setSelected(sale)}><ShieldCheckIcon /></Button> : null}
+                      {canChat ? <Button size="icon-sm" className="bg-emerald-600 text-white shadow-sm hover:bg-emerald-700" disabled={!(sale.whatsappPhone || sale.customerPhone) || openingChatId === sale.saleId} title={!(sale.whatsappPhone || sale.customerPhone) ? "Sin celular registrado" : "Chatear"} aria-label="Chatear" onClick={() => void openShippingChat(sale)}><ChatBubbleLeftRightIcon className={cn(openingChatId === sale.saleId && "animate-pulse")} /></Button> : null}
+                    </div></td> : null}
                   </tr>
                 ))}
               </tbody>
@@ -680,7 +1259,7 @@ export default function CrmSalesPage() {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <p className="text-sm font-bold text-slate-900 dark:text-slate-100">#{sale.saleId}</p>
-                      <span className={sourceClass(sale)}>{sale.source === "IA_KIMENTS" ? "IA" : "CRM"}</span>
+                      <span className={sourceClass(sale)}>{sale.source === "IA_KIMENTS" ? "IA" : sale.source}</span>
                     </div>
                     <p className="mt-1 truncate text-xs font-medium text-slate-800 dark:text-slate-200">
                       {sale.customerName || "Cliente WhatsApp"}
@@ -719,35 +1298,39 @@ export default function CrmSalesPage() {
                     <p className="truncate">{sale.branch || "Sin sucursal"}</p>
                     <p className="truncate">{sale.receiptType} · {sale.number}</p>
                   </div>
-                  <Button
-                    className="h-8 shrink-0 rounded-lg px-3 text-xs"
-                    size="sm"
-                    variant={sale.reviewStatus === "PENDING" ? "default" : "outline"}
-                    disabled={!sale.evidenceId && !sale.filmAddonId}
-                    onClick={() => setSelected(sale)}
-                  >
-                    {sale.reviewStatus === "PENDING" ? "Validar" : "Detalle"}
-                  </Button>
+                  {showActions ? <div className="flex shrink-0 gap-1">
+                    <Button size="icon-sm" className="bg-blue-600 text-white shadow-sm hover:bg-blue-700" title="Ver detalle" aria-label="Ver detalle" onClick={() => setDetailSale(sale)}><EyeIcon /></Button>
+                    {isAdmin && sale.source === "IA_KIMENTS" && sale.reviewStatus === "PENDING" ? <Button size="icon-sm" className="bg-amber-500 text-white shadow-sm hover:bg-amber-600" title="Validar pago" aria-label="Validar pago" onClick={() => setSelected(sale)}><ShieldCheckIcon /></Button> : null}
+                    {canChat ? <Button size="icon-sm" className="bg-emerald-600 text-white shadow-sm hover:bg-emerald-700" disabled={!(sale.whatsappPhone || sale.customerPhone) || openingChatId === sale.saleId} title={!(sale.whatsappPhone || sale.customerPhone) ? "Sin celular registrado" : "Chatear"} aria-label="Chatear" onClick={() => void openShippingChat(sale)}><ChatBubbleLeftRightIcon className={cn(openingChatId === sale.saleId && "animate-pulse")} /></Button> : null}
+                  </div> : null}
                 </div>
               </article>
             ))}
+            <div ref={loadMoreRef} className="lg:hidden">
+              {loadingMore ? <div className="p-5"><LoaderSpinner text="Cargando más ventas..." /></div> : null}
+            </div>
           </div>
 
           <div className="flex items-center justify-between border-t border-slate-100 px-3 pb-3 pt-3 dark:border-slate-700/60 sm:px-0 sm:pb-0">
             <p className="text-xs text-muted-foreground">
-              {data.totalElements} ventas{data.totalPages > 0 && ` · Página ${data.page + 1} de ${data.totalPages}`}
+              {data.totalElements} ventas
             </p>
-            <div className="flex items-center gap-2">
-              <button type="button" disabled={page <= 0 || loading} onClick={() => setPage((current) => Math.max(0, current - 1))} className="inline-flex items-center gap-1 rounded-xl border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">
-                <ChevronLeftIcon className="h-4 w-4" /> Anterior
+            <div className="hidden items-center gap-2 lg:flex">
+              <button type="button" disabled={page <= 0 || loading} onClick={() => setPage((current) => Math.max(0, current - 1))} className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-300 text-slate-600 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800" aria-label="Página anterior" title="Página anterior">
+                <ChevronLeftIcon className="h-4 w-4" />
               </button>
-              <button type="button" disabled={page + 1 >= data.totalPages || loading} onClick={() => setPage((current) => current + 1)} className="inline-flex items-center gap-1 rounded-xl border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">
-                Siguiente <ChevronRightIcon className="h-4 w-4" />
+              <span className="min-w-16 text-center text-xs font-semibold tabular-nums text-foreground">
+                {data.totalPages > 0 ? `${data.page + 1} / ${data.totalPages}` : "0 / 0"}
+              </span>
+              <button type="button" disabled={page + 1 >= data.totalPages || loading} onClick={() => setPage((current) => current + 1)} className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-300 text-slate-600 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800" aria-label="Página siguiente" title="Página siguiente">
+                <ChevronRightIcon className="h-4 w-4" />
               </button>
             </div>
           </div>
         </section>
       </div>
+      <SearchSale open={searchSaleOpen} onOpenChange={setSearchSaleOpen} onFound={setDetailSale} />
+      <SaleDetail sale={detailSale} open={Boolean(detailSale)} onOpenChange={(open) => { if (!open) setDetailSale(null) }} canChat={canChat} openingChat={openingChatId === detailSale?.saleId} onChat={() => { if (detailSale) void openShippingChat(detailSale) }} />
       <ReviewDialog sale={selected} open={Boolean(selected)} onOpenChange={(open) => { if (!open) setSelected(null) }} onUpdated={() => void load()} />
     </main>
   )

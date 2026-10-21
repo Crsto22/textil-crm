@@ -7,14 +7,14 @@ import { Header } from "@/components/Header";
 import { Sidebar, navSections } from "@/components/Sidebar";
 import { LoaderOverlay } from "@/components/ui/loader-overlay";
 import { useAuth } from "@/lib/auth/auth-context";
-import { CRM_STANDARD_USER_PATHS, hasCrmAccess, isCrmAdmin, isCrmStandardUserPath } from "@/lib/auth/roles";
+import { canAccessCrmPath, hasCrmAccess, isCrmAdmin } from "@/lib/auth/roles";
 import { cn } from "@/lib/utils";
 
-function MobileBottomNav({ hidden, isAdmin }: { hidden: boolean; isAdmin: boolean }) {
+function MobileBottomNav({ hidden, isAdmin, user }: { hidden: boolean; isAdmin: boolean; user: { rol?: string | null; accesoCrm?: boolean } | null }) {
   const pathname = usePathname();
   const router = useRouter();
   const items = navSections.flatMap((section) => section.items).filter(
-    (item) => (isAdmin || CRM_STANDARD_USER_PATHS.includes(item.href as (typeof CRM_STANDARD_USER_PATHS)[number])) && item.href !== "/reportes"
+    (item) => (isAdmin || canAccessCrmPath(user, item.href)) && item.href !== "/reportes"
   );
 
   const isActive = (href: string) =>
@@ -70,7 +70,8 @@ export default function ProtectedLayout({ children }: { children: ReactNode }) {
   const { user, isAuthenticated, isLoading } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
-  const isChatPage = pathname === "/chat";
+  const isChatPage = pathname === "/chat" || pathname === "/envios";
+  const isMobileFullWidthPage = pathname === "/ventas";
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [hideChatMobileChrome, setHideChatMobileChrome] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(isChatPage);
@@ -90,8 +91,8 @@ export default function ProtectedLayout({ children }: { children: ReactNode }) {
       return;
     }
 
-    if (!userIsAdmin && !isCrmStandardUserPath(pathname)) {
-      router.replace("/chat");
+    if (!canAccessCrmPath(user, pathname)) {
+      router.replace(user?.rol === "ALMACEN" ? "/envios" : "/chat");
     }
   }, [isLoading, isAuthenticated, user, userIsAdmin, pathname, router]);
 
@@ -99,7 +100,7 @@ export default function ProtectedLayout({ children }: { children: ReactNode }) {
     if (pathname === previousPathnameRef.current) return;
     previousPathnameRef.current = pathname;
 
-    if (pathname === "/chat") {
+    if (pathname === "/chat" || pathname === "/envios") {
       const frame = window.requestAnimationFrame(() => {
         setSidebarCollapsed(true);
       });
@@ -124,7 +125,7 @@ export default function ProtectedLayout({ children }: { children: ReactNode }) {
 
   if (isLoading) return <LoaderOverlay />;
   if (!isAuthenticated || !hasCrmAccess(user)) return null;
-  if (!userIsAdmin && !isCrmStandardUserPath(pathname)) return <LoaderOverlay />;
+  if (!canAccessCrmPath(user, pathname)) return <LoaderOverlay />;
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -146,15 +147,17 @@ export default function ProtectedLayout({ children }: { children: ReactNode }) {
         </div>
         <main
           className={cn(
-            "flex-1 bg-gray-50 dark:bg-[oklch(0.1_0_0)]",
-            isChatPage ? "overflow-hidden p-0" : "overflow-y-auto p-6",
+            "min-h-0 flex-1 bg-gray-50 dark:bg-[oklch(0.1_0_0)]",
+            isChatPage
+              ? "overflow-hidden p-0"
+              : cn("overflow-y-auto p-6", isMobileFullWidthPage && "max-md:p-0"),
             !hideChatMobileChrome ? "max-md:pb-24" : "",
           )}
         >
           {children}
         </main>
       </div>
-      <MobileBottomNav hidden={hideChatMobileChrome} isAdmin={userIsAdmin} />
+      <MobileBottomNav hidden={hideChatMobileChrome} isAdmin={userIsAdmin} user={user} />
     </div>
   );
 }

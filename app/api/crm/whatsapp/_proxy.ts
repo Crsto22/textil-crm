@@ -3,7 +3,7 @@ import { forwardCookies } from "../../auth/_helpers"
 
 const BACKEND_URL = process.env.BACKEND_URL
 
-export async function proxyWhatsappRequest(request: NextRequest, path: string, method: "GET" | "POST" | "PUT" | "DELETE") {
+export async function proxyWhatsappRequest(request: NextRequest, path: string, method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE") {
   if (!BACKEND_URL) {
     return NextResponse.json({ message: "BACKEND_URL no configurado" }, { status: 500 })
   }

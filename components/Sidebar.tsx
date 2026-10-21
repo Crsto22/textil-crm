@@ -4,6 +4,7 @@ import { useEffect, useState, type ComponentType } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
   BuildingOffice2Icon,
+  BoltIcon,
   ChartBarIcon,
   ChatBubbleLeftRightIcon,
   ChevronDownIcon,
@@ -19,6 +20,7 @@ import {
 } from "@heroicons/react/24/outline";
 import {
   BuildingOffice2Icon as BuildingOffice2IconSolid,
+  BoltIcon as BoltIconSolid,
   ChartBarIcon as ChartBarIconSolid,
   ChatBubbleLeftRightIcon as ChatBubbleLeftRightIconSolid,
   Cog6ToothIcon as Cog6ToothIconSolid,
@@ -28,7 +30,7 @@ import {
   ShoppingBagIcon as ShoppingBagIconSolid,
 } from "@heroicons/react/24/solid";
 import { useAuth } from "@/lib/auth/auth-context";
-import { CRM_STANDARD_USER_PATHS, isCrmAdmin } from "@/lib/auth/roles";
+import { canAccessCrmPath, isCrmAdmin } from "@/lib/auth/roles";
 
 interface SidebarProps {
   isOpen: boolean;
@@ -60,6 +62,12 @@ export const navSections: SidebarSection[] = [
         icon: ChatBubbleLeftRightIcon,
         iconActive: ChatBubbleLeftRightIconSolid,
       },
+        {
+          label: "Comandos",
+          href: "/comandos",
+          icon: BoltIcon,
+          iconActive: BoltIconSolid,
+        },
         {
           label: "Ventas",
           href: "/ventas",
@@ -177,7 +185,7 @@ export function Sidebar({
     .map((section) => ({
       ...section,
       items: section.items.filter((item) =>
-        (userIsAdmin || CRM_STANDARD_USER_PATHS.includes(item.href as (typeof CRM_STANDARD_USER_PATHS)[number]))
+        (userIsAdmin || canAccessCrmPath(user, item.href))
         && matchQuery(item)),
     }))
     .filter((section) => section.items.length > 0);

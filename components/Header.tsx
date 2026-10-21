@@ -4,9 +4,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRightStartOnRectangleIcon,
   Bars3Icon,
+  ChatBubbleLeftRightIcon,
   MagnifyingGlassIcon,
+  TruckIcon,
 } from "@heroicons/react/24/outline";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { navSections } from "@/components/Sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -29,6 +31,7 @@ interface HeaderProps {
 
 const pageTitles: Record<string, string> = {
   "/chat": "Chat",
+  "/comandos": "Comandos",
   "/ventas": "Ventas",
   "/contacto": "Contacto",
   "/conexiones": "Conexiones",
@@ -41,6 +44,7 @@ const pageTitles: Record<string, string> = {
 export function Header({ onMenuToggle, showMenuButton = true }: HeaderProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const searchInputRef = useRef<HTMLInputElement>(null);
   const { user, logout } = useAuth();
   const userIsAdmin = isCrmAdmin(user?.rol);
@@ -110,14 +114,24 @@ export function Header({ onMenuToggle, showMenuButton = true }: HeaderProps) {
   const userName = [user?.nombre, user?.apellido].filter(Boolean).join(" ") || "Usuario CRM";
   const userEmail = user?.correo ?? "Sesion activa";
   const roleLabel = getRoleLabel(user?.rol);
+  const showChatAreaSelector = pathname === "/chat" && userIsAdmin;
+  const chatArea = searchParams.get("area") === "shipping" ? "shipping" : "sales";
   const nameParts = userName.split(" ");
   const firstName = nameParts[0] ?? "";
   const lastName = nameParts.slice(1).join(" ") || (firstName.charAt(1) ?? "");
 
+  const changeChatArea = (area: "sales" | "shipping") => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (area === "shipping") params.set("area", "shipping");
+    else params.delete("area");
+    const query = params.toString();
+    router.replace(`/chat${query ? `?${query}` : ""}`, { scroll: false });
+  };
+
   return (
     <>
       <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/95 backdrop-blur-xl dark:border-white/[0.06] dark:bg-[oklch(0.13_0_0/.95)]">
-        <div className="flex h-16 items-center justify-between gap-4 px-4 sm:px-6">
+        <div className="flex h-16 items-center justify-between gap-2 px-2 sm:gap-4 sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
             {showMenuButton && (
               <button
@@ -141,6 +155,40 @@ export function Header({ onMenuToggle, showMenuButton = true }: HeaderProps) {
           </div>
 
           <div className="flex items-center gap-1.5">
+            {showChatAreaSelector && (
+              <div
+                className="mr-0.5 grid w-[148px] shrink-0 grid-cols-2 rounded-xl border border-slate-200 bg-slate-100 p-1 sm:w-[190px] dark:border-white/10 dark:bg-white/5"
+                aria-label="Area del chat"
+              >
+                <button
+                  type="button"
+                  aria-pressed={chatArea === "sales"}
+                  onClick={() => changeChatArea("sales")}
+                  className={`flex h-8 items-center justify-center gap-1 rounded-lg text-[11px] font-bold transition sm:gap-1.5 sm:text-xs ${
+                    chatArea === "sales"
+                      ? "bg-white text-slate-900 shadow-sm dark:bg-white/10 dark:text-white"
+                      : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
+                  }`}
+                >
+                  <ChatBubbleLeftRightIcon className="h-3.5 w-3.5 shrink-0" />
+                  Ventas
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={chatArea === "shipping"}
+                  onClick={() => changeChatArea("shipping")}
+                  className={`flex h-8 items-center justify-center gap-1 rounded-lg text-[11px] font-bold transition sm:gap-1.5 sm:text-xs ${
+                    chatArea === "shipping"
+                      ? "bg-white text-emerald-700 shadow-sm dark:bg-white/10 dark:text-emerald-300"
+                      : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
+                  }`}
+                >
+                  <TruckIcon className="h-3.5 w-3.5 shrink-0" />
+                  Envios
+                </button>
+              </div>
+            )}
+
             <button
               type="button"
               onClick={() => setIsSearchOpen(true)}

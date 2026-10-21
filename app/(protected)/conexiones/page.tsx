@@ -29,6 +29,7 @@ import {
 import { authFetch } from "@/lib/auth/auth-fetch"
 
 type WhatsappStatusValue = "INITIALIZING" | "QR_REQUIRED" | "CONNECTED" | "DISCONNECTED" | "AUTH_FAILURE"
+type WhatsappArea = "SALES" | "SHIPPING"
 
 interface WhatsappBranch {
   idSucursal: number
@@ -37,6 +38,7 @@ interface WhatsappBranch {
 }
 
 interface WhatsappStatus {
+  area: WhatsappArea
   clientId: string
   status: WhatsappStatusValue
   connectedNumber: string | null
@@ -78,6 +80,7 @@ interface AgentConfig {
   paymentReservationSeconds: number
   receiptMinimumConfidence: number
   advisorAttentionEnabled: boolean
+  firstImageToAdvisorEnabled: boolean
   jobMaxAttempts: number
   outboxMaxAttempts: number
   maxMessagesPerBatch: number
@@ -127,6 +130,7 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
   paymentReservationSeconds: 240,
   receiptMinimumConfidence: 85,
   advisorAttentionEnabled: false,
+  firstImageToAdvisorEnabled: false,
   jobMaxAttempts: 3,
   outboxMaxAttempts: 5,
   maxMessagesPerBatch: 15,
@@ -227,6 +231,8 @@ export default function ConexionesPage() {
   const [activeTab, setActiveTab] = useState<"whatsapp" | "ai">("whatsapp")
   const [aiTab, setAiTab] = useState<"gemini" | "rag" | "agent">("gemini")
   const [status, setStatus] = useState<WhatsappStatus | null>(null)
+  const [shippingStatus, setShippingStatus] = useState<WhatsappStatus | null>(null)
+  const [selectedWhatsappArea, setSelectedWhatsappArea] = useState<WhatsappArea>("SALES")
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -263,27 +269,32 @@ export default function ConexionesPage() {
   const loadConnection = useCallback(async () => {
     setIsRefreshing(true)
     try {
-      const response = await authFetch("/api/crm/whatsapp/status", { cache: "no-store" })
+      const response = await authFetch("/api/crm/whatsapp/connections", { cache: "no-store" })
       if (!response.ok) throw new Error(await readMessage(response, "Microservicio de WhatsApp no disponible"))
-      const nextStatus = (await response.json()) as WhatsappStatus
+      const connections = (await response.json()) as WhatsappStatus[]
+      const nextStatus = connections.find((connection) => connection.area === "SALES") || null
+      const nextShippingStatus = connections.find((connection) => connection.area === "SHIPPING") || null
       setStatus(nextStatus)
-      setSelectedBranchId((current) => current || (nextStatus.branch ? String(nextStatus.branch.idSucursal) : ""))
+      setShippingStatus(nextShippingStatus)
+      setSelectedBranchId((current) => current || (nextStatus?.branch ? String(nextStatus.branch.idSucursal) : ""))
       setError(null)
-      if (nextStatus.connectionConfigured && nextStatus.status === "QR_REQUIRED" && nextStatus.hasQr) {
-        const qrResponse = await authFetch("/api/crm/whatsapp/qr", { cache: "no-store" })
+      const selectedStatus = selectedWhatsappArea === "SALES" ? nextStatus : nextShippingStatus
+      if (isWhatsappModalOpen && selectedStatus?.connectionConfigured && selectedStatus.status === "QR_REQUIRED" && selectedStatus.hasQr) {
+        const qrResponse = await authFetch(`/api/crm/whatsapp/connections/${selectedWhatsappArea.toLowerCase()}/qr`, { cache: "no-store" })
         if (qrResponse.ok) setQrDataUrl(((await qrResponse.json()) as WhatsappQrResponse).qrDataUrl || null)
       } else {
         setQrDataUrl(null)
       }
     } catch (requestError) {
       setStatus(null)
+      setShippingStatus(null)
       setQrDataUrl(null)
       setError(requestError instanceof Error ? requestError.message : "Microservicio de WhatsApp no disponible")
     } finally {
       setIsLoading(false)
       setIsRefreshing(false)
     }
-  }, [])
+  }, [isWhatsappModalOpen, selectedWhatsappArea])
 
   const loadBranches = useCallback(async () => {
     setIsLoadingBranches(true)
@@ -358,6 +369,13 @@ export default function ConexionesPage() {
     }, 0)
     return () => window.clearTimeout(timeoutId)
   }, [loadAgentConfig, loadConnection, loadCredentials, loadKnowledge, loadShalomSync])
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      if (!document.hidden) void loadConnection()
+    }, 15000)
+    return () => window.clearInterval(intervalId)
+  }, [loadConnection])
 
   const handleSyncShalom = async () => {
     setIsSyncingShalom(true)
@@ -567,7 +585,7 @@ export default function ConexionesPage() {
     if (!window.confirm("¿Cerrar la sesión actual de WhatsApp?")) return
     setIsLoggingOut(true)
     try {
-      const response = await authFetch("/api/crm/whatsapp/logout", { method: "POST" })
+      const response = await authFetch(`/api/crm/whatsapp/connections/${selectedWhatsappArea.toLowerCase()}/logout`, { method: "POST" })
       if (!response.ok) throw new Error(await readMessage(response, "No se pudo cerrar la sesión"))
       toast.success("Sesión de WhatsApp cerrada")
       await loadConnection()
@@ -579,10 +597,11 @@ export default function ConexionesPage() {
   }
 
   const handleAcknowledgePhoneChange = async () => {
-    if (!status?.phoneChanged || !window.confirm(`¿Confirmar el nuevo número ${status.connectedNumber}?`)) return
+    const activeStatus = selectedWhatsappArea === "SALES" ? status : shippingStatus
+    if (!activeStatus?.phoneChanged || !window.confirm(`¿Confirmar el nuevo número ${activeStatus.connectedNumber}?`)) return
     setIsAcknowledgingPhoneChange(true)
     try {
-      const response = await authFetch("/api/crm/whatsapp/connection/acknowledge-phone-change", { method: "POST" })
+      const response = await authFetch(`/api/crm/whatsapp/connections/${selectedWhatsappArea.toLowerCase()}/acknowledge-phone-change`, { method: "POST" })
       if (!response.ok) throw new Error(await readMessage(response, "No se pudo confirmar el nuevo número"))
       await loadConnection()
       toast.success("Nuevo número confirmado")
@@ -593,7 +612,8 @@ export default function ConexionesPage() {
     }
   }
 
-  const currentStatus = status ? statusMap[status.status] : null
+  const activeWhatsappStatus = selectedWhatsappArea === "SALES" ? status : shippingStatus
+  const currentStatus = activeWhatsappStatus ? statusMap[activeWhatsappStatus.status] : null
   const monitoring = agentConfig.monitoring
 
   return (
@@ -765,6 +785,30 @@ export default function ConexionesPage() {
           <Switch checked={agentConfig.advisorAttentionEnabled} onCheckedChange={(checked) => setAgentConfig((current) => ({ ...current, advisorAttentionEnabled: checked }))} />
         </div>
 
+        {agentConfig.advisorAttentionEnabled && (
+          <details className="group overflow-hidden rounded-xl border border-border">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-muted/40 [&::-webkit-details-marker]:hidden">
+              <span>
+                <span className="block text-xs font-semibold">Reglas de derivacion a asesoras</span>
+                <span className="mt-0.5 block text-[11px] text-muted-foreground">Configura en que casos una conversacion pasa directamente a atencion humana.</span>
+              </span>
+              <span className="text-lg leading-none text-muted-foreground transition-transform group-open:rotate-45">+</span>
+            </summary>
+            <div className="border-t border-border p-4">
+              <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg bg-muted/30 p-3">
+                <div className="max-w-2xl">
+                  <p className="text-xs font-semibold">Derivar si el primer mensaje es una imagen</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Activado: la conversacion pasa de inmediato a una asesora. Desactivado: IA Kiments continua atendiendo y solo deriva si no puede resolver el caso.</p>
+                </div>
+                <Switch
+                  checked={agentConfig.firstImageToAdvisorEnabled}
+                  onCheckedChange={(checked) => setAgentConfig((current) => ({ ...current, firstImageToAdvisorEnabled: checked }))}
+                />
+              </div>
+            </div>
+          </details>
+        )}
+
         <div className="grid gap-3 sm:grid-cols-2">
           <button
             type="button"
@@ -851,25 +895,34 @@ export default function ConexionesPage() {
       </div>
 
       <div className={activeTab === "whatsapp" ? "block" : "hidden"}>
-        <section className="rounded-2xl border border-border bg-background p-5 shadow-sm">
-          <div className="flex items-start gap-3">
-            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-100">
-              <Image src="/svg/whatsapp.svg" alt="WhatsApp" width={30} height={30} />
-            </span>
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="text-sm font-semibold">WhatsApp</h3>
-                {currentStatus && <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${currentStatus.className}`}>{currentStatus.label}</span>}
-              </div>
-              <p className="mt-1 text-xs text-muted-foreground">{status?.connectedNumber ? `Número conectado: ${status.connectedNumber}` : currentStatus?.description || "Consultando conexión..."}</p>
-              {status?.branch && <p className="mt-1 text-xs text-muted-foreground">Sucursal: {status.branch.nombreSucursal}</p>}
-            </div>
-          </div>
-          {error && <p className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">{error}</p>}
-          <Button type="button" className="mt-5 w-full" onClick={() => setIsWhatsappModalOpen(true)}>
-            <QrCodeIcon className="h-4 w-4" />Administrar conexión
-          </Button>
-        </section>
+        <div className="grid gap-4 md:grid-cols-2">
+          {(["SALES", "SHIPPING"] as WhatsappArea[]).map((area) => {
+            const connection = area === "SALES" ? status : shippingStatus
+            const visualStatus = connection ? statusMap[connection.status] : null
+            return (
+              <section key={area} className="rounded-2xl border border-border bg-background p-5 shadow-sm">
+                <div className="flex items-start gap-3">
+                  <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-100">
+                    <Image src="/svg/whatsapp.svg" alt="WhatsApp" width={30} height={30} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-sm font-semibold">WhatsApp de {area === "SALES" ? "Ventas" : "Envíos"}</h3>
+                      {visualStatus && <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${visualStatus.className}`}>{visualStatus.label}</span>}
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">{connection?.connectedNumber ? `Número conectado: ${connection.connectedNumber}` : visualStatus?.description || "Consultando conexión..."}</p>
+                    {connection?.lastActivityAt && <p className="mt-1 text-[11px] text-muted-foreground">Última actividad: {new Date(connection.lastActivityAt).toLocaleString("es-PE")}</p>}
+                    {area === "SALES" && connection?.branch && <p className="mt-1 text-xs text-muted-foreground">Sucursal: {connection.branch.nombreSucursal}</p>}
+                  </div>
+                </div>
+                {error && <p className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">{error}</p>}
+                <Button type="button" className="mt-5 w-full" onClick={() => { setSelectedWhatsappArea(area); setQrDataUrl(null); setIsWhatsappModalOpen(true) }}>
+                  <QrCodeIcon className="h-4 w-4" />Administrar conexión
+                </Button>
+              </section>
+            )
+          })}
+        </div>
 
       </div>
 
@@ -1003,8 +1056,8 @@ export default function ConexionesPage() {
       <Dialog open={isWhatsappModalOpen} onOpenChange={setIsWhatsappModalOpen}>
         <DialogContent className="flex max-h-[92dvh] w-[calc(100vw-2rem)] max-w-2xl flex-col overflow-hidden rounded-2xl p-0">
           <DialogHeader className="border-b border-border px-5 pb-3 pt-5 text-left">
-            <DialogTitle>Conexión de WhatsApp</DialogTitle>
-            <DialogDescription>Vincula la sucursal y escanea el QR cuando sea necesario.</DialogDescription>
+            <DialogTitle>WhatsApp de {selectedWhatsappArea === "SALES" ? "Ventas" : "Envíos"}</DialogTitle>
+            <DialogDescription>{selectedWhatsappArea === "SALES" ? "Vincula la sucursal y escanea el QR cuando sea necesario." : "Escanea el QR con el número exclusivo del área de Envíos."}</DialogDescription>
           </DialogHeader>
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
             {isLoading ? <p className="rounded-xl border border-border p-5 text-sm text-muted-foreground">Consultando estado...</p> : (
@@ -1013,15 +1066,15 @@ export default function ConexionesPage() {
                   <div><p className="text-sm font-semibold">{currentStatus?.label || "Sin conexión"}</p><p className="mt-1 text-xs text-muted-foreground">{currentStatus?.description}</p></div>
                   <Button type="button" size="sm" variant="outline" onClick={() => void loadConnection()} disabled={isRefreshing}><ArrowPathIcon className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />Actualizar</Button>
                 </div>
-                {status?.phoneChanged && <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-800"><p className="font-semibold">Se detectó un número distinto: {status.connectedNumber}</p><Button type="button" size="sm" className="mt-3" onClick={() => void handleAcknowledgePhoneChange()} disabled={isAcknowledgingPhoneChange}>Confirmar número</Button></div>}
-                <div className="space-y-2 rounded-xl border border-border p-4">
+                {activeWhatsappStatus?.phoneChanged && <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-800"><p className="font-semibold">Se detectó un número distinto: {activeWhatsappStatus.connectedNumber}</p><Button type="button" size="sm" className="mt-3" onClick={() => void handleAcknowledgePhoneChange()} disabled={isAcknowledgingPhoneChange}>Confirmar número</Button></div>}
+                {selectedWhatsappArea === "SALES" && <div className="space-y-2 rounded-xl border border-border p-4">
                   <label className="text-xs font-medium">Sucursal de venta<select value={selectedBranchId} onChange={(event) => setSelectedBranchId(event.target.value)} disabled={isLoadingBranches} className="mt-1 h-10 w-full rounded-lg border border-input bg-background px-3 text-xs"><option value="">Selecciona una sucursal</option>{branches.map((branch) => <option key={branch.idSucursal} value={branch.idSucursal}>{branch.nombreSucursal}</option>)}</select></label>
                   <Button type="button" size="sm" onClick={() => void handleSaveBranch()} disabled={isSavingBranch || !selectedBranchId}>{isSavingBranch ? "Guardando..." : "Guardar sucursal"}</Button>
-                </div>
+                </div>}
                 {qrDataUrl && <div className="flex flex-col items-center rounded-xl border border-border p-5"><Image src={qrDataUrl} alt="Código QR de WhatsApp" width={260} height={260} unoptimized /><p className="mt-3 text-center text-xs text-muted-foreground">Escanea este código desde Dispositivos vinculados en WhatsApp.</p></div>}
-                {status?.status === "CONNECTED" && <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800"><CheckCircleIcon className="h-5 w-5" />WhatsApp conectado{status.connectedNumber ? ` como ${status.connectedNumber}` : ""}.</div>}
-                {status?.lastError && <div className="flex gap-2 rounded-xl border border-red-200 bg-red-50 p-4 text-xs text-red-700"><ExclamationTriangleIcon className="h-5 w-5 shrink-0" />{status.lastError}</div>}
-                {status?.status === "CONNECTED" && <Button type="button" variant="outline" className="w-full text-red-600" onClick={() => void handleLogout()} disabled={isLoggingOut}><ArrowRightOnRectangleIcon className="h-4 w-4" />{isLoggingOut ? "Cerrando..." : "Cerrar sesión de WhatsApp"}</Button>}
+                {activeWhatsappStatus?.status === "CONNECTED" && <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800"><CheckCircleIcon className="h-5 w-5" />WhatsApp conectado{activeWhatsappStatus.connectedNumber ? ` como ${activeWhatsappStatus.connectedNumber}` : ""}.</div>}
+                {activeWhatsappStatus?.lastError && <div className="flex gap-2 rounded-xl border border-red-200 bg-red-50 p-4 text-xs text-red-700"><ExclamationTriangleIcon className="h-5 w-5 shrink-0" />{activeWhatsappStatus.lastError}</div>}
+                {activeWhatsappStatus?.status === "CONNECTED" && <Button type="button" variant="outline" className="w-full text-red-600" onClick={() => void handleLogout()} disabled={isLoggingOut}><ArrowRightOnRectangleIcon className="h-4 w-4" />{isLoggingOut ? "Cerrando..." : "Cerrar sesión de WhatsApp"}</Button>}
               </>
             )}
           </div>

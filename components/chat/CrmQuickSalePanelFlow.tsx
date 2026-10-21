@@ -399,6 +399,7 @@ export function CrmQuickSalePanelFlow({
   const [paymentDate, setPaymentDate] = useState(today)
   const [paymentTime, setPaymentTime] = useState("")
   const [backupPhone, setBackupPhone] = useState("")
+  const [backupName, setBackupName] = useState("")
   const [backupPhoneModalOpen, setBackupPhoneModalOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const previousSucursalRef = useRef<number | null>(selectedSucursalId)
@@ -589,6 +590,7 @@ export function CrmQuickSalePanelFlow({
       descuentoTotal: discountAmount,
       tipoDescuento: discountMode === "percent" ? "PORCENTAJE" : discountMode === "amount" ? "MONTO" : null,
       telefonoRespaldo: normalizePeruvianMobile(backupPhone),
+      nombreRespaldo: backupName.trim() || null,
       detalles: cart.map((item) => ({
         idProductoVariante: item.idProductoVariante,
         descripcion: `${item.nombre} ${item.color} ${item.talla}`.trim(),
@@ -826,18 +828,37 @@ export function CrmQuickSalePanelFlow({
               Agrega un numero de celular para crear o enlazar el cliente antes de registrar la venta.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-2 px-4 py-4">
-            <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500">
-              Celular
-            </label>
-            <input
-              value={backupPhone}
-              onChange={(event) => setBackupPhone(sanitizePeruvianMobileInput(event.target.value))}
-              placeholder="Ej. 932889985"
-              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-950"
-            />
+          <div className="space-y-4 px-4 py-4">
+            <div className="space-y-2">
+              <label htmlFor="crm-quick-sale-backup-phone" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                Celular
+              </label>
+              <input
+                id="crm-quick-sale-backup-phone"
+                value={backupPhone}
+                onChange={(event) => setBackupPhone(sanitizePeruvianMobileInput(event.target.value))}
+                placeholder="Ej. 932889985"
+                inputMode="numeric"
+                autoComplete="tel"
+                className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-950"
+              />
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="crm-quick-sale-backup-name" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                Nombre del cliente <span className="font-medium normal-case tracking-normal">(opcional)</span>
+              </label>
+              <input
+                id="crm-quick-sale-backup-name"
+                value={backupName}
+                onChange={(event) => setBackupName(event.target.value)}
+                placeholder="Ej. Maria Lopez"
+                autoComplete="name"
+                maxLength={150}
+                className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-950"
+              />
+            </div>
             <p className="text-[11px] text-slate-400">
-              Se usara para buscar el cliente existente o crear CLIENTE {normalizePeruvianMobile(backupPhone) || "..."}.
+              Primero se buscara el celular en el CRM. Si no existe, se creara como {backupName.trim() || `CLIENTE (${normalizePeruvianMobile(backupPhone) || "..."})`}.
             </p>
           </div>
           <DialogFooter className="gap-2 border-t border-slate-100 px-4 py-3 dark:border-slate-700/60">

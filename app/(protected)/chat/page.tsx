@@ -10,6 +10,7 @@ import {
   type DragEvent as ReactDragEvent,
   type MouseEvent as ReactMouseEvent,
   type RefObject,
+  type UIEvent as ReactUIEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type TouchEvent as ReactTouchEvent,
 } from "react";
@@ -22,6 +23,7 @@ import {
   ArrowPathIcon,
   ArrowPathRoundedSquareIcon,
   BackspaceIcon,
+  BoltIcon,
   ChatBubbleLeftRightIcon,
   ChevronDownIcon,
   ShoppingBagIcon,
@@ -56,13 +58,16 @@ import type { PDFDocumentLoadingTask, RenderTask } from "pdfjs-dist";
 import { toast } from "sonner";
 
 import { ChatAvatar } from "@/components/chat/ChatAvatar";
+import { AuthenticatedImageThumbnail } from "@/components/chat/AuthenticatedImageThumbnail";
 import type { ChatMessage, Conversation } from "@/components/chat/chat-data";
 import { ChatWallpaperLayer } from "@/components/chat/ChatWallpaperLayer";
+import { ChatConversationSkeletons, ChatMessageSkeletons } from "@/components/chat/ChatLoadingSkeletons";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
+import { ShippingChatPanel } from "@/components/chat/ShippingChatPanel";
 import { Button } from "@/components/ui/button";
 import { authFetch } from "@/lib/auth/auth-fetch";
 import { useAuth } from "@/lib/auth/auth-context";
-import { isCrmAdmin } from "@/lib/auth/roles";
+import { isCrmAdmin, isWarehouseUser } from "@/lib/auth/roles";
 import { cn } from "@/lib/utils";
 import {
   Dialog,
@@ -70,6 +75,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import type { QuickMessage } from "@/lib/crm/quick-messages";
+import { readQuickMessageApiError } from "@/lib/crm/quick-messages";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -86,13 +93,13 @@ const AUDIO_WAVEFORM_BARS = [10, 18, 14, 24, 16, 30, 20, 12, 26, 18, 32, 14, 24,
 const CRM_WHATSAPP_MEDIA_MAX_BYTES = 10 * 1024 * 1024;
 const CRM_WHATSAPP_MEDIA_MAX_LABEL = "10 MB";
 const CONVERSATION_PAGE_SIZE = 10;
-const MESSAGE_PAGE_SIZE = 15;
+const MESSAGE_PAGE_SIZE = 10;
 const MESSAGE_CACHE_LIMIT = 5;
 
 type ConversationStatus = "ESPERA" | "ATENDIDO" | "RESUELTO";
 type AttentionQueue = "AGENT_ACTIVE" | "ADVISOR_REQUIRED" | "HUMAN_ACTIVE" | "RESOLVED";
 type WaitingReason = "ADVISOR_REQUIRED";
-type ConversationFilter = "all" | "agent" | "human" | "waiting" | "resolved";
+type ConversationFilter = "all" | "mine" | "agent" | "waiting" | "resolved";
 
 type CrmConversation = Conversation & {
   phone: string;
@@ -156,6 +163,7 @@ interface ConversationPageResponse {
       agent: number;
       waiting: number;
       resolved: number;
+      mine: number;
   };
 }
 
@@ -654,63 +662,13 @@ const mobileEmojiCategories = [
     label: "Caras",
     icon: FaceSmileIcon,
     emojis: [
-      "Ã°Å¸Ëœâ‚¬",
-      "Ã°Å¸ËœÆ’",
-      "Ã°Å¸Ëœâ€ž",
-      "Ã°Å¸ËœÂ",
-      "Ã°Å¸Ëœâ€ ",
-      "Ã°Å¸Â¥Â¹",
-      "Ã°Å¸Ëœâ€¦",
-      "Ã°Å¸Ëœâ€š",
-      "Ã°Å¸Â¤Â£",
-      "Ã°Å¸Â¥Â²",
-      "Ã°Å¸ËœÅ ",
-      "Ã¢ËœÂºÃ¯Â¸Â",
-      "Ã°Å¸Ëœâ€¡",
-      "Ã°Å¸â„¢â€š",
-      "Ã°Å¸â„¢Æ’",
-      "Ã°Å¸Ëœâ€°",
-      "Ã°Å¸ËœÅ’",
-      "Ã°Å¸ËœÂ",
-      "Ã°Å¸Â¥Â°",
-      "Ã°Å¸ËœËœ",
-      "Ã°Å¸Ëœâ€”",
-      "Ã°Å¸Ëœâ„¢",
-      "Ã°Å¸ËœÅ¡",
-      "Ã°Å¸Ëœâ€¹",
-      "Ã°Å¸Ëœâ€º",
-      "Ã°Å¸ËœÂ",
-      "Ã°Å¸ËœÅ“",
-      "Ã°Å¸Â¤Âª",
-      "Ã°Å¸Â¤Â¨",
-      "Ã°Å¸Â§Â",
-      "Ã°Å¸Â¤â€œ",
-      "Ã°Å¸ËœÅ½",
-      "Ã°Å¸Â¥Â³",
-      "Ã°Å¸ËœÂ",
-      "Ã°Å¸Ëœâ€™",
-      "Ã°Å¸ËœÅ¾",
-      "Ã°Å¸Ëœâ€",
-      "Ã°Å¸ËœÅ¸",
-      "Ã°Å¸Ëœâ€¢",
-      "Ã°Å¸â„¢Â",
-      "Ã¢ËœÂ¹Ã¯Â¸Â",
-      "Ã°Å¸ËœÂ£",
-      "Ã°Å¸Ëœâ€“",
-      "Ã°Å¸ËœÂ«",
-      "Ã°Å¸ËœÂ©",
-      "Ã°Å¸Â¥Âº",
-      "Ã°Å¸ËœÂ¢",
-      "Ã°Å¸ËœÂ­",
-      "Ã°Å¸ËœÂ¤",
-      "Ã°Å¸ËœÂ ",
-      "Ã°Å¸ËœÂ¡",
-      "Ã°Å¸Â¤Â¬",
-      "Ã°Å¸Â¤Â¯",
-      "Ã°Å¸ËœÂ³",
-      "Ã°Å¸Â¥Âµ",
-      "Ã°Å¸Â¥Â¶",
-      "Ã°Å¸ËœÂ±",
+      "😀", "😃", "😄", "😁", "😆", "🥹", "😅", "😂",
+      "🤣", "🥲", "😊", "☺️", "😇", "🙂", "🙃", "😉",
+      "😌", "😍", "🥰", "😘", "😗", "😙", "😚", "😋",
+      "😛", "😝", "😜", "🤪", "🤨", "🧐", "🤓", "😎",
+      "🥳", "😏", "😒", "😞", "😔", "😟", "😕", "🙁",
+      "☹️", "😣", "😖", "😫", "😩", "🥺", "😢", "😭",
+      "😤", "😠", "😡", "🤬", "🤯", "😳", "🥵", "🥶", "😱",
     ],
   },
   {
@@ -718,38 +676,10 @@ const mobileEmojiCategories = [
     label: "Gestos",
     icon: HandRaisedIcon,
     emojis: [
-      "Ã°Å¸â€˜â€¹",
-      "Ã°Å¸Â¤Å¡",
-      "Ã°Å¸â€“ÂÃ¯Â¸Â",
-      "Ã¢Å“â€¹",
-      "Ã°Å¸â€“â€“",
-      "Ã°Å¸â€˜Å’",
-      "Ã°Å¸Â¤Å’",
-      "Ã°Å¸Â¤Â",
-      "Ã¢Å“Å’Ã¯Â¸Â",
-      "Ã°Å¸Â¤Å¾",
-      "Ã°Å¸Â«Â°",
-      "Ã°Å¸Â¤Å¸",
-      "Ã°Å¸Â¤Ëœ",
-      "Ã°Å¸Â¤â„¢",
-      "Ã°Å¸â€˜Ë†",
-      "Ã°Å¸â€˜â€°",
-      "Ã°Å¸â€˜â€ ",
-      "Ã°Å¸â€“â€¢",
-      "Ã°Å¸â€˜â€¡",
-      "Ã¢ËœÂÃ¯Â¸Â",
-      "Ã°Å¸â€˜Â",
-      "Ã°Å¸â€˜Å½",
-      "Ã¢Å“Å ",
-      "Ã°Å¸â€˜Å ",
-      "Ã°Å¸Â¤â€º",
-      "Ã°Å¸Â¤Å“",
-      "Ã°Å¸â€˜Â",
-      "Ã°Å¸â„¢Å’",
-      "Ã°Å¸Â«Â¶",
-      "Ã°Å¸Â¤Â²",
-      "Ã°Å¸Â¤Â",
-      "Ã°Å¸â„¢Â",
+      "👋", "🤚", "🖐️", "✋", "🖖", "👌", "🤌", "🤏",
+      "✌️", "🤞", "🫰", "🤟", "🤘", "🤙", "👈", "👉",
+      "👆", "🖕", "👇", "☝️", "👍", "👎", "✊", "👊",
+      "🤛", "🤜", "👏", "🙌", "🫶", "🤲", "🤝", "🙏",
     ],
   },
   {
@@ -757,30 +687,9 @@ const mobileEmojiCategories = [
     label: "Amor",
     icon: HeartIcon,
     emojis: [
-      "Ã¢ÂÂ¤Ã¯Â¸Â",
-      "Ã°Å¸Â§Â¡",
-      "Ã°Å¸â€™â€º",
-      "Ã°Å¸â€™Å¡",
-      "Ã°Å¸â€™â„¢",
-      "Ã°Å¸â€™Å“",
-      "Ã°Å¸â€“Â¤",
-      "Ã°Å¸Â¤Â",
-      "Ã°Å¸Â¤Å½",
-      "Ã°Å¸â€™â€",
-      "Ã¢ÂÂ£Ã¯Â¸Â",
-      "Ã°Å¸â€™â€¢",
-      "Ã°Å¸â€™Å¾",
-      "Ã°Å¸â€™â€œ",
-      "Ã°Å¸â€™â€”",
-      "Ã°Å¸â€™â€“",
-      "Ã°Å¸â€™Ëœ",
-      "Ã°Å¸â€™Â",
-      "Ã°Å¸â€™Å¸",
-      "Ã¢â„¢Â¥Ã¯Â¸Â",
-      "Ã°Å¸â€™â€¹",
-      "Ã°Å¸â€™Â¯",
-      "Ã°Å¸â€Â¥",
-      "Ã¢Å“Â¨",
+      "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍",
+      "🤎", "💔", "❣️", "💕", "💞", "💓", "💗", "💖",
+      "💘", "💝", "💟", "♥️", "💋", "💯", "🔥", "✨",
     ],
   },
   {
@@ -788,77 +697,21 @@ const mobileEmojiCategories = [
     label: "Objetos",
     icon: SparklesIcon,
     emojis: [
-      "Ã°Å¸Å½â€°",
-      "Ã°Å¸Å½Å ",
-      "Ã°Å¸Å½Â",
-      "Ã°Å¸â€ºÂÃ¯Â¸Â",
-      "Ã°Å¸Â§Â¾",
-      "Ã°Å¸â€œÂ¦",
-      "Ã°Å¸â€œÅ’",
-      "Ã°Å¸â€œÂ",
-      "Ã¢Å“â€šÃ¯Â¸Â",
-      "Ã°Å¸Â§Âµ",
-      "Ã°Å¸ÂªÂ¡",
-      "Ã°Å¸â€˜â€¢",
-      "Ã°Å¸â€˜Å¡",
-      "Ã°Å¸â€˜â€”",
-      "Ã°Å¸Â§Â¥",
-      "Ã°Å¸â€˜â€“",
-      "Ã°Å¸Â§Â¢",
-      "Ã°Å¸â€˜Å¸",
-      "Ã°Å¸â€˜Å“",
-      "Ã°Å¸â€™Â¼",
-      "Ã°Å¸â€œÂ±",
-      "Ã¢ËœÅ½Ã¯Â¸Â",
-      "Ã°Å¸â€™Â¬",
-      "Ã¢Å“â€¦",
-      "Ã¢Ëœâ€˜Ã¯Â¸Â",
-      "Ã¢ÂÅ’",
-      "Ã¢Å¡Â Ã¯Â¸Â",
-      "Ã¢Â­Â",
-      "Ã°Å¸Å’Å¸",
-      "Ã°Å¸â€™Â°",
-      "Ã°Å¸â€™Â³",
-      "Ã°Å¸Å¡Å¡",
+      "🎉", "🎊", "🎁", "🛍️", "🧾", "📦", "📌", "📍",
+      "✂️", "🧵", "🪡", "👕", "👚", "👗", "🧥", "👖",
+      "🧢", "👟", "👛", "💼", "📱", "☎️", "💬", "✅",
+      "☑️", "❌", "⚠️", "⭐", "🌟", "💰", "💳", "🚚",
     ],
   },
   {
     id: "symbols",
-    label: "Simbolos",
+    label: "Símbolos",
     icon: SwatchIcon,
     emojis: [
-      "Ã°Å¸â€Â´",
-      "Ã°Å¸Å¸Â ",
-      "Ã°Å¸Å¸Â¡",
-      "Ã°Å¸Å¸Â¢",
-      "Ã°Å¸â€Âµ",
-      "Ã°Å¸Å¸Â£",
-      "Ã¢Å¡Â«",
-      "Ã¢Å¡Âª",
-      "Ã¢Â¬â€º",
-      "Ã¢Â¬Å“",
-      "Ã°Å¸Å¸Â¥",
-      "Ã°Å¸Å¸Â§",
-      "Ã°Å¸Å¸Â¨",
-      "Ã°Å¸Å¸Â©",
-      "Ã°Å¸Å¸Â¦",
-      "Ã°Å¸Å¸Âª",
-      "Ã¢Â¬â€ Ã¯Â¸Â",
-      "Ã¢Å¾Â¡Ã¯Â¸Â",
-      "Ã¢Â¬â€¡Ã¯Â¸Â",
-      "Ã¢Â¬â€¦Ã¯Â¸Â",
-      "Ã¢â€ â€”Ã¯Â¸Â",
-      "Ã¢â€ ËœÃ¯Â¸Â",
-      "Ã°Å¸â€Â",
-      "Ã°Å¸â€â€",
-      "Ã°Å¸â€â€¢",
-      "Ã°Å¸â€œÂ£",
-      "Ã°Å¸â€â€™",
-      "Ã°Å¸â€â€œ",
-      "Ã°Å¸â€Å½",
-      "Ã°Å¸â€™Â¡",
-      "Ã°Å¸â€œâ€¦",
-      "Ã¢ÂÂ°",
+      "🔴", "🟠", "🟡", "🟢", "🔵", "🟣", "⚫", "⚪",
+      "⬛", "⬜", "🟥", "🟧", "🟨", "🟩", "🟦", "🟪",
+      "⬆️", "➡️", "⬇️", "⬅️", "↗️", "↘️", "🔁", "🔄",
+      "🔕", "📣", "🔒", "🔓", "🔎", "💡", "📅", "⏰",
     ],
   },
 ];
@@ -1639,9 +1492,9 @@ function MessageBubble({
                   {item.text}
                 </p>
                 <p className="mt-0.5 text-xs text-white/65">
-                  {item.pageCount ? `${item.pageCount} paginas Ã‚Â· ` : ""}
+                  {item.pageCount ? `${item.pageCount} páginas · ` : ""}
                   PDF
-                  {item.fileSize ? ` Ã‚Â· ${formatFileSize(item.fileSize)}` : ""}
+                  {item.fileSize ? ` · ${formatFileSize(item.fileSize)}` : ""}
                 </p>
               </div>
               {item.fileUrl && (
@@ -1709,7 +1562,7 @@ function MessageBubble({
               onClick={() => onRetry?.(item)}
               className="ml-2 rounded-full bg-red-500/10 px-2 py-0.5 font-semibold text-red-600 hover:bg-red-500/20 dark:text-red-300"
             >
-              Error Ã‚Â· Reintentar
+              Error · Reintentar
             </button>
           ) : isOutgoingFile ? (
             <MessageStatusChecks status={item.status} />
@@ -1800,7 +1653,7 @@ function MessageBubble({
               onClick={() => onRetry?.(item)}
               className="ml-2 rounded-full bg-red-500/10 px-2 py-0.5 font-semibold text-red-600 hover:bg-red-500/20 dark:text-red-300"
             >
-              Error Ã‚Â· Reintentar
+              Error · Reintentar
             </button>
           ) : isOutgoingAudio ? (
             <MessageStatusChecks status={item.status} />
@@ -1831,7 +1684,7 @@ function MessageBubble({
               onClick={() => onRetry?.(item)}
               className="ml-2 rounded-full bg-red-500/10 px-2 py-0.5 font-semibold text-red-600 hover:bg-red-500/20 dark:text-red-300"
             >
-              Error Ã‚Â· Reintentar
+              Error · Reintentar
             </button>
           ) : (
             <MessageStatusChecks status={item.status} />
@@ -1974,13 +1827,19 @@ function PdfFirstPagePreview({
   );
 }
 
-export default function ChatPage() {
+function SalesChatPage() {
   const { user } = useAuth();
   const isAdmin = isCrmAdmin(user?.rol);
   const { resolvedTheme } = useTheme();
   const searchParams = useSearchParams();
   const requestedConversationId = searchParams.get("conversationId");
   const [messageDraft, setMessageDraft] = useState("");
+  const [quickMessages, setQuickMessages] = useState<QuickMessage[]>([]);
+  const [quickMessagesLoading, setQuickMessagesLoading] = useState(true);
+  const [quickCommandIndex, setQuickCommandIndex] = useState(0);
+  const [quickCommandMenuDismissed, setQuickCommandMenuDismissed] = useState(false);
+  const [isQuickMessageSending, setIsQuickMessageSending] = useState(false);
+  const quickMessageSendingRef = useRef(false);
   const [conversations, setConversations] = useState<CrmConversation[]>([]);
   const conversationsRef = useRef<CrmConversation[]>([]);
   const conversationCacheRef = useRef<Record<string, ConversationCacheEntry>>({});
@@ -2005,7 +1864,7 @@ export default function ChatPage() {
   const handledRequestedConversationRef = useRef<string | null>(null);
   const allMessagesRef = useRef<Record<string, ChatMessage[]>>({});
   const sentAttachmentUrlsRef = useRef<string[]>([]);
-  const [activeFilter, setActiveFilter] = useState<ConversationFilter>("all");
+  const [activeFilter, setActiveFilter] = useState<ConversationFilter>(() => isAdmin ? "all" : "mine");
   const [conversationSearchInput, setConversationSearchInput] = useState("");
   const [conversationSearch, setConversationSearch] = useState("");
   const [selectedTagFilterId, setSelectedTagFilterId] = useState<string | null>(null);
@@ -2013,6 +1872,7 @@ export default function ChatPage() {
   const [hasMoreConversations, setHasMoreConversations] = useState(false);
   const [isConversationListLoading, setIsConversationListLoading] = useState(true);
   const [isLoadingMoreConversations, setIsLoadingMoreConversations] = useState(false);
+  const isLoadingMoreConversationsRef = useRef(false);
   const [conversationListError, setConversationListError] = useState("");
   const conversationAbortRef = useRef<AbortController | null>(null);
   const conversationCountsRefreshTimerRef = useRef<number | null>(null);
@@ -2029,6 +1889,7 @@ export default function ChatPage() {
     agent: 0,
     waiting: 0,
     resolved: 0,
+    mine: 0,
   });
   const [resolvedIds, setResolvedIds] = useState<Set<string>>(new Set());
   const [isConversationActionPending, setIsConversationActionPending] = useState(false);
@@ -2048,11 +1909,13 @@ export default function ChatPage() {
   const [isDeletingConversation, setIsDeletingConversation] = useState(false);
 
   const loadConversations = useCallback(async (options?: { append?: boolean; reset?: boolean; force?: boolean }) => {
+    const append = options?.append === true;
+    if (append && isLoadingMoreConversationsRef.current) return;
+    isLoadingMoreConversationsRef.current = append;
     conversationAbortRef.current?.abort();
     const controller = new AbortController();
     conversationAbortRef.current = controller;
     const requestId = ++conversationRequestRef.current;
-    const append = options?.append === true;
     const reset = options?.reset === true;
     const loadedCount = conversationsRef.current.length;
     const requestPage = append ? Math.floor(loadedCount / CONVERSATION_PAGE_SIZE) : 0;
@@ -2062,7 +1925,7 @@ export default function ChatPage() {
         ? CONVERSATION_PAGE_SIZE
         : Math.max(CONVERSATION_PAGE_SIZE, Math.ceil(loadedCount / CONVERSATION_PAGE_SIZE) * CONVERSATION_PAGE_SIZE);
     const view = activeFilter === "agent" ? "AGENT"
-      : activeFilter === "human" ? "ATTENDED"
+      : activeFilter === "mine" ? "MINE"
       : activeFilter === "waiting" ? "WAITING"
         : activeFilter === "resolved" ? "RESOLVED" : "ALL";
     const cacheKey = `${view}|${conversationSearch}|${selectedTagFilterId ?? ""}`;
@@ -2070,7 +1933,7 @@ export default function ChatPage() {
     const cachedQueueCount = cached
       ? view === "WAITING" ? cached.counts.waiting
           : view === "AGENT" ? cached.counts.agent
-          : view === "ATTENDED" ? cached.counts.attended
+          : view === "MINE" ? cached.counts.mine
           : view === "RESOLVED" ? cached.counts.resolved
             : cached.counts.all
       : 0;
@@ -2138,6 +2001,7 @@ export default function ChatPage() {
       setConversationListError(message);
       throw error;
     } finally {
+      if (append) isLoadingMoreConversationsRef.current = false;
       if (requestId === conversationRequestRef.current) {
         conversationAbortRef.current = null;
         setIsConversationListLoading(false);
@@ -2146,9 +2010,27 @@ export default function ChatPage() {
     }
   }, [activeFilter, conversationSearch, selectedTagFilterId]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    void authFetch("/api/crm/whatsapp/quick-messages", { cache: "no-store", signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(await readQuickMessageApiError(response, "No se pudieron cargar los comandos"));
+        setQuickMessages((await response.json()) as QuickMessage[]);
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) {
+          toast.error(error instanceof Error ? error.message : "No se pudieron cargar los comandos");
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setQuickMessagesLoading(false);
+      });
+    return () => controller.abort();
+  }, []);
+
   const refreshConversationCounts = useCallback(async () => {
     const view = activeFilter === "agent" ? "AGENT"
-      : activeFilter === "human" ? "ATTENDED"
+      : activeFilter === "mine" ? "MINE"
       : activeFilter === "waiting" ? "WAITING"
         : activeFilter === "resolved" ? "RESOLVED" : "ALL";
     const params = new URLSearchParams({ view, page: "0", size: "1" });
@@ -2425,7 +2307,7 @@ export default function ChatPage() {
       setConversations((current) =>
         current.map((conversation) => conversation.id === conversationId ? accepted : conversation),
       );
-      setActiveFilter("human");
+      setActiveFilter("mine");
       await loadMessages(conversationId);
       toast.success("Chat aceptado. Atencion humana activada");
     } catch (error) {
@@ -2538,7 +2420,7 @@ export default function ChatPage() {
       const activeConversation = conversations.find((conversation) => conversation.id === activeConversationId);
       const willBeVisible = filter === "all"
         || (filter === "agent" && activeConversation?.attentionQueue === "AGENT_ACTIVE")
-        || (filter === "human" && activeConversation?.attentionQueue === "HUMAN_ACTIVE")
+        || (filter === "mine" && activeConversation?.assignedUserId === user?.idUsuario && activeConversation?.status !== "RESUELTO")
         || (filter === "waiting" && activeConversation?.attentionQueue === "ADVISOR_REQUIRED")
         || (filter === "resolved" && activeConversation?.attentionQueue === "RESOLVED");
       if (!willBeVisible) {
@@ -2569,6 +2451,10 @@ export default function ChatPage() {
   const applyRealtimeEvent = useCallback((event: CrmRealtimeEvent) => {
     if (event.type === "whatsapp.connection.updated" && event.connection) {
       setWhatsappConnection(event.connection);
+      const conversationId = activeConversationIdRef.current;
+      if (conversationId && !event.connection.phoneChanged) {
+        void loadMessages(conversationId, { preserveLocal: true }).catch(() => undefined);
+      }
       return;
     }
     if (event.type.startsWith("payment.")) {
@@ -2580,20 +2466,22 @@ export default function ChatPage() {
     const mappedConversation = mapConversation(event.conversation);
     refreshConversationCountsRef.current();
     const expectedQueue: AttentionQueue = activeFilter === "agent" ? "AGENT_ACTIVE"
-      : activeFilter === "human" ? "HUMAN_ACTIVE"
+      : activeFilter === "mine" ? "HUMAN_ACTIVE"
       : activeFilter === "waiting" ? "ADVISOR_REQUIRED"
         : activeFilter === "resolved" ? "RESOLVED" : "HUMAN_ACTIVE";
     const accessible = isAdmin
       || mappedConversation.assignedUserId === user?.idUsuario
-      || (mappedConversation.status === "ESPERA" && !mappedConversation.assignedUserId);
+      || (mappedConversation.status !== "RESUELTO" && !mappedConversation.assignedUserId);
     const matchesActiveList = accessible && (activeFilter === "all"
       ? true
       : activeFilter === "agent"
         ? mappedConversation.attentionQueue === "AGENT_ACTIVE"
-      : activeFilter === "human"
-        ? mappedConversation.attentionQueue === "HUMAN_ACTIVE"
+      : activeFilter === "mine"
+        ? mappedConversation.assignedUserId === user?.idUsuario && mappedConversation.status !== "RESUELTO"
       : activeFilter === "waiting"
-        ? mappedConversation.attentionQueue === "ADVISOR_REQUIRED"
+        ? !mappedConversation.assignedUserId
+          && mappedConversation.status !== "RESUELTO"
+          && mappedConversation.attentionQueue !== "AGENT_ACTIVE"
         : mappedConversation.attentionQueue === expectedQueue);
 
     setConversations((current) => {
@@ -2614,10 +2502,14 @@ export default function ChatPage() {
         event.type !== "conversation.removed"
         && (cacheView === "ALL"
           ? true
+          : cacheView === "MINE"
+            ? mappedConversation.assignedUserId === user?.idUsuario && mappedConversation.status !== "RESUELTO"
           : cacheView === "AGENT"
             ? mappedConversation.attentionQueue === "AGENT_ACTIVE"
           : cacheView === "WAITING"
-            ? mappedConversation.attentionQueue === "ADVISOR_REQUIRED"
+            ? !mappedConversation.assignedUserId
+              && mappedConversation.status !== "RESUELTO"
+              && mappedConversation.attentionQueue !== "AGENT_ACTIVE"
             : mappedConversation.attentionQueue === ({ ATTENDED: "HUMAN_ACTIVE", RESOLVED: "RESOLVED" } as Record<string, AttentionQueue>)[cacheView])
         && (exists || (!cacheSearch && !cacheTag))
       ) {
@@ -2655,7 +2547,7 @@ export default function ChatPage() {
     if (activeConversationIdRef.current === conversationId) {
       setMessages(cachedMessages);
     }
-  }, [activeFilter, conversationSearch, isAdmin, selectedTagFilterId, storeMessageCache, user?.idUsuario]);
+  }, [activeFilter, conversationSearch, isAdmin, loadMessages, selectedTagFilterId, storeMessageCache, user?.idUsuario]);
 
   useEffect(() => {
     realtimeEventHandlerRef.current = applyRealtimeEvent;
@@ -2807,13 +2699,14 @@ export default function ChatPage() {
   const activeConversationTags = activeConversation?.tags ?? [];
   const allConversationCount = conversationCounts.all;
   const agentConversationCount = conversationCounts.agent;
-  const humanConversationCount = conversationCounts.attended;
+  const mineConversationCount = conversationCounts.mine ?? 0;
   const waitingCount = conversationCounts.waiting;
   const isAgentActive = activeConversation?.attentionQueue === "AGENT_ACTIVE";
   const isSharedUnassignedActive = Boolean(
     activeConversation
     && !activeConversation.assignedUserId
-    && activeConversation.attentionQueue === "ADVISOR_REQUIRED",
+    && activeConversation.status !== "RESUELTO"
+    && activeConversation.attentionQueue !== "AGENT_ACTIVE",
   );
   const isUnassignedWaitingActive = isSharedUnassignedActive;
   const canOperateActiveConversation = Boolean(activeConversationId)
@@ -3670,13 +3563,28 @@ export default function ChatPage() {
     }
   };
 
+  const quickCommandMatch = messageDraft.match(/^\/([a-z0-9_-]*)$/i);
+  const quickCommandQuery = quickCommandMatch?.[1]?.toLowerCase() ?? null;
+  const matchingQuickMessages = quickCommandQuery == null
+    ? []
+    : quickMessages
+        .filter((command) => command.keyword.toLowerCase().includes(quickCommandQuery));
+  const showQuickCommandMenu = quickCommandQuery != null
+    && !quickCommandMenuDismissed;
+
+  const updateMessageDraft = (value: string) => {
+    setMessageDraft(value);
+    setQuickCommandIndex(0);
+    setQuickCommandMenuDismissed(false);
+  };
+
   const handleDraftChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
-    setMessageDraft(event.currentTarget.value);
+    updateMessageDraft(event.currentTarget.value);
     resizeMessageTextarea(event.currentTarget);
   };
 
   const handleDraftInput = (event: FormEvent<HTMLTextAreaElement>) => {
-    setMessageDraft(event.currentTarget.value);
+    updateMessageDraft(event.currentTarget.value);
     resizeMessageTextarea(event.currentTarget);
   };
 
@@ -3691,14 +3599,12 @@ export default function ChatPage() {
     return element.scrollHeight - element.scrollTop - element.clientHeight < 120;
   };
 
-  const handleMessagesScroll = () => {
-    shouldStickToBottomRef.current = isNearMessagesBottom(messageScrollRef.current);
-  };
-
+  const isLoadingOlderMessagesRef = useRef(false);
   const handleLoadOlderMessages = async () => {
-    if (!activeConversationId || isOlderMessagesLoading) return;
+    if (!activeConversationId || isLoadingOlderMessagesRef.current) return;
     const meta = messageCacheMetaRef.current[activeConversationId];
     if (!meta?.oldestId || !meta.hasMoreBefore) return;
+    isLoadingOlderMessagesRef.current = true;
     const scrollElement = messageScrollRef.current;
     const previousHeight = scrollElement?.scrollHeight ?? 0;
     const previousTop = scrollElement?.scrollTop ?? 0;
@@ -3711,12 +3617,55 @@ export default function ChatPage() {
       });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No se pudo cargar el historial anterior");
+    } finally {
+      isLoadingOlderMessagesRef.current = false;
+    }
+  };
+
+  const handleMessagesScroll = () => {
+    const scrollElement = messageScrollRef.current;
+    shouldStickToBottomRef.current = isNearMessagesBottom(scrollElement);
+    if (scrollElement && scrollElement.scrollTop <= 80) {
+      void handleLoadOlderMessages();
+    }
+  };
+
+  const handleConversationListScroll = (event: ReactUIEvent<HTMLDivElement>) => {
+    const scrollElement = event.currentTarget;
+    const distanceFromBottom = scrollElement.scrollHeight - scrollElement.scrollTop - scrollElement.clientHeight;
+    if (distanceFromBottom <= 120 && hasMoreConversations && !isLoadingMoreConversationsRef.current) {
+      void loadConversations({ append: true }).catch(() => undefined);
     }
   };
 
   const handleMessageKeyDown = (
     event: ReactKeyboardEvent<HTMLTextAreaElement>,
   ) => {
+    if (showQuickCommandMenu && matchingQuickMessages.length > 0) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setQuickCommandIndex((current) => (current + 1) % matchingQuickMessages.length);
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setQuickCommandIndex((current) => (current - 1 + matchingQuickMessages.length) % matchingQuickMessages.length);
+        return;
+      }
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        const command = matchingQuickMessages[Math.min(quickCommandIndex, matchingQuickMessages.length - 1)];
+        if (command) {
+          void sendQuickMessage(command);
+        }
+        return;
+      }
+    }
+    if (event.key === "Escape" && showQuickCommandMenu) {
+      event.preventDefault();
+      setQuickCommandMenuDismissed(true);
+      return;
+    }
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       handleSendMessage();
@@ -3767,6 +3716,60 @@ export default function ChatPage() {
 
   const sendTextMessage = (text: string, replyToMessageId?: string | null) =>
     sendTextMessageTo(activeConversationId, text, replyToMessageId);
+
+  const sendQuickMessage = async (command: QuickMessage) => {
+    if (!activeConversationId || !canOperateActiveConversation || quickMessageSendingRef.current) return;
+    const conversationId = activeConversationId;
+    quickMessageSendingRef.current = true;
+    setIsQuickMessageSending(true);
+    setQuickCommandMenuDismissed(true);
+    const sentMessages: ChatMessage[] = [];
+    try {
+      for (let index = 0; index < command.blocks.length; index++) {
+        const block = command.blocks[index];
+        const response = await authFetch(
+          `/api/crm/whatsapp/quick-messages/${command.id}/blocks/${block.id}/send`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ conversationId: Number(conversationId) }),
+          },
+        );
+        if (!response.ok) throw new Error(await readQuickMessageApiError(response, `No se pudo enviar el bloque ${index + 1}`));
+        sentMessages.push(mapMessage((await response.json()) as CrmMessageResponse));
+      }
+      if (activeConversationIdRef.current === conversationId) {
+        setMessages((current) => dedupeMessages([...current, ...sentMessages]));
+      }
+      allMessagesRef.current = {
+        ...allMessagesRef.current,
+        [conversationId]: dedupeMessages([...(allMessagesRef.current[conversationId] ?? []), ...sentMessages]),
+      };
+      setMessageDraft("");
+      const input = getActiveMessageInput();
+      if (input) {
+        input.value = "";
+        resizeMessageTextarea(input);
+      }
+      toast.success(`/${command.keyword} enviado`);
+    } catch (error) {
+      if (sentMessages.length > 0) {
+        if (activeConversationIdRef.current === conversationId) {
+          setMessages((current) => dedupeMessages([...current, ...sentMessages]));
+        }
+        allMessagesRef.current = {
+          ...allMessagesRef.current,
+          [conversationId]: dedupeMessages([...(allMessagesRef.current[conversationId] ?? []), ...sentMessages]),
+        };
+      }
+      const detail = error instanceof Error ? error.message : "No se pudo enviar el comando";
+      toast.error(`${sentMessages.length} de ${command.blocks.length} bloques enviados. ${detail}`);
+    } finally {
+      quickMessageSendingRef.current = false;
+      setIsQuickMessageSending(false);
+      window.requestAnimationFrame(() => getActiveMessageInput()?.focus());
+    }
+  };
 
   const sendMediaAttachment = async (
     conversationId: string,
@@ -4427,7 +4430,34 @@ export default function ChatPage() {
 
   return (
     <>
-    <section className="relative flex h-full min-h-0 bg-background text-foreground">
+    <section className="relative flex h-full min-h-0 flex-col bg-background text-foreground">
+      {whatsappBlocked && whatsappConnection && (
+        <div
+          role="alert"
+          className="z-30 flex shrink-0 items-center gap-3 border-b border-amber-300 bg-amber-50 px-4 py-3 text-amber-950 shadow-sm dark:border-amber-500/30 dark:bg-amber-950 dark:text-amber-50 md:px-6"
+        >
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-200/70 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300">
+            <ExclamationTriangleIcon className="h-5 w-5" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-bold md:text-base">
+              {whatsappConnection.phoneChanged ? "WhatsApp cambió de número" : "WhatsApp está desconectado"}
+            </p>
+            <p className="mt-0.5 hidden text-xs text-amber-800 dark:text-amber-200 sm:block">
+              {whatsappConnection.phoneChanged
+                ? "Un administrador debe confirmar el nuevo número antes de responder mensajes."
+                : "Vuelve a conectar la sesión para recibir y responder mensajes desde el CRM."}
+            </p>
+          </div>
+          <Link
+            href="/conexiones"
+            className="inline-flex h-9 shrink-0 items-center justify-center rounded-lg bg-amber-900 px-3 text-xs font-bold text-white transition hover:bg-amber-950 dark:bg-amber-400 dark:text-amber-950 dark:hover:bg-amber-300 md:px-4 md:text-sm"
+          >
+            Ir a Conexiones
+          </Link>
+        </div>
+      )}
+      <div className="flex min-h-0 flex-1">
       <aside
         className={`w-full shrink-0 flex-col border-r border-border bg-background md:flex md:w-[360px] xl:w-[380px] ${
           mobileView === "list" ? "flex" : "hidden"
@@ -4524,26 +4554,28 @@ export default function ChatPage() {
 
           <div className="mt-3">
             <div className="grid grid-cols-2 gap-1.5 rounded-2xl border border-border/70 bg-muted/35 p-1.5">
-              <button
-                type="button"
-                aria-pressed={activeFilter === "all"}
-                onClick={() => changeFilter("all")}
-                className={cn(
-                  "group inline-flex min-h-9 items-center gap-2 rounded-xl border px-2.5 text-left text-xs font-semibold transition-all",
-                  activeFilter === "all"
-                    ? "border-border bg-background text-foreground shadow-sm"
-                    : "border-transparent text-muted-foreground hover:bg-background/70 hover:text-foreground",
-                )}
-              >
-                <ChatBubbleLeftRightIcon className="h-4 w-4 shrink-0" />
-                <span className="min-w-0 flex-1 truncate">Todos los chats</span>
-                <span className={cn(
-                  "inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-[10px] font-bold tabular-nums",
-                  activeFilter === "all" ? "bg-foreground text-background" : "bg-background text-muted-foreground",
-                )}>
-                  {allConversationCount}
-                </span>
-              </button>
+              {isAdmin && (
+                <button
+                  type="button"
+                  aria-pressed={activeFilter === "all"}
+                  onClick={() => changeFilter("all")}
+                  className={cn(
+                    "group inline-flex min-h-9 items-center gap-2 rounded-xl border px-2.5 text-left text-xs font-semibold transition-all",
+                    activeFilter === "all"
+                      ? "border-border bg-background text-foreground shadow-sm"
+                      : "border-transparent text-muted-foreground hover:bg-background/70 hover:text-foreground",
+                  )}
+                >
+                  <ChatBubbleLeftRightIcon className="h-4 w-4 shrink-0" />
+                  <span className="min-w-0 flex-1 truncate">Todos</span>
+                  <span className={cn(
+                    "inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-[10px] font-bold tabular-nums",
+                    activeFilter === "all" ? "bg-foreground text-background" : "bg-background text-muted-foreground",
+                  )}>
+                    {allConversationCount}
+                  </span>
+                </button>
+              )}
 
               <button
                 type="button"
@@ -4568,22 +4600,22 @@ export default function ChatPage() {
 
               <button
                 type="button"
-                aria-pressed={activeFilter === "human"}
-                onClick={() => changeFilter("human")}
+                aria-pressed={activeFilter === "mine"}
+                onClick={() => changeFilter("mine")}
                 className={cn(
                   "group inline-flex min-h-9 items-center gap-2 rounded-xl border px-2.5 text-left text-xs font-semibold transition-all",
-                  activeFilter === "human"
+                  activeFilter === "mine"
                     ? "border-violet-200 bg-violet-50 text-violet-800 shadow-sm dark:border-violet-800 dark:bg-violet-950/70 dark:text-violet-200"
                     : "border-transparent text-muted-foreground hover:bg-background/70 hover:text-foreground",
                 )}
               >
                 <UserIconSolid className="h-4 w-4 shrink-0" />
-                <span className="min-w-0 flex-1 truncate">Humano</span>
+                <span className="min-w-0 flex-1 truncate">Tus chats</span>
                 <span className={cn(
                   "inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-[10px] font-bold tabular-nums",
-                  activeFilter === "human" ? "bg-violet-600 text-white" : "bg-background text-muted-foreground",
+                  activeFilter === "mine" ? "bg-violet-600 text-white" : "bg-background text-muted-foreground",
                 )}>
-                  {humanConversationCount}
+                  {mineConversationCount}
                 </span>
               </button>
 
@@ -4639,19 +4671,12 @@ export default function ChatPage() {
           </div>
         </div>
 
-        <div className="sidebar-scroll min-h-0 flex-1 overflow-y-auto">
+        <div
+          className="sidebar-scroll min-h-0 flex-1 overflow-y-auto"
+          onScroll={handleConversationListScroll}
+        >
           {isConversationListLoading ? (
-            <div className="space-y-3 px-4 py-5" aria-label="Cargando chats">
-              {Array.from({ length: 10 }, (_, index) => (
-                <div key={index} className="flex animate-pulse items-center gap-3 py-2">
-                  <div className="h-10 w-10 rounded-full bg-muted" />
-                  <div className="min-w-0 flex-1 space-y-2">
-                    <div className="h-3 w-2/3 rounded bg-muted" />
-                    <div className="h-2.5 w-full rounded bg-muted" />
-                  </div>
-                </div>
-              ))}
-            </div>
+            <ChatConversationSkeletons />
           ) : conversationListError && filteredConversations.length === 0 ? (
             <div className="px-6 py-12 text-center">
               <p className="text-sm font-semibold text-foreground">No se pudieron cargar los chats</p>
@@ -4686,10 +4711,8 @@ export default function ChatPage() {
                   conversation={{ ...conversation, active: conversation.id === activeConversationId }}
                   accepting={acceptingConversationId === conversation.id}
                   onAccept={
-                    conversation.status === "ESPERA"
+                    conversation.status !== "RESUELTO"
                       && !conversation.assignedUserId
-                      && (conversation.attentionQueue === "ADVISOR_REQUIRED"
-                        || conversation.attentionQueue === "AGENT_ACTIVE")
                       ? () => void handleAcceptCurrent(conversation.id)
                       : undefined
                   }
@@ -4700,19 +4723,8 @@ export default function ChatPage() {
               {conversationListError && (
                 <p className="px-4 py-2 text-center text-xs text-destructive">{conversationListError}</p>
               )}
-              {hasMoreConversations && (
-                <div className="px-4 py-4">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="w-full rounded-full text-xs"
-                    disabled={isLoadingMoreConversations}
-                    onClick={() => void loadConversations({ append: true }).catch(() => undefined)}
-                  >
-                    {isLoadingMoreConversations ? "Cargando..." : "Ver mÃƒÂ¡s"}
-                  </Button>
-                </div>
+              {isLoadingMoreConversations && (
+                <p className="px-4 py-4 text-center text-xs text-muted-foreground">Cargando chats...</p>
               )}
             </>
           )}
@@ -4759,7 +4771,7 @@ export default function ChatPage() {
                   Control: {activeConversation?.attentionQueue === "AGENT_ACTIVE"
                     ? "IA Kiments"
                     : activeConversation?.attentionQueue === "HUMAN_ACTIVE"
-                      ? "Humano"
+                      ? "Asesora"
                       : activeConversation?.attentionQueue === "ADVISOR_REQUIRED"
                         ? "En espera"
                         : "Resuelto"}
@@ -4921,33 +4933,10 @@ export default function ChatPage() {
           >
             <div className="flex min-h-full flex-col justify-end gap-3">
               {isMessagesLoading && messages.length === 0 ? (
-                <div className="flex flex-col gap-3 py-4" aria-label="Cargando mensajes">
-                  {Array.from({ length: 6 }, (_, index) => (
-                    <div
-                      key={index}
-                      className={cn(
-                        "h-14 animate-pulse rounded-xl bg-background/70 shadow-sm",
-                        index % 2 === 0 ? "mr-auto w-[58%]" : "ml-auto w-[48%]",
-                      )}
-                    />
-                  ))}
-                </div>
+                <ChatMessageSkeletons />
               ) : (
                 <>
-                  {activeConversationId && messageCacheMetaRef.current[activeConversationId]?.hasMoreBefore && (
-                    <div className="flex justify-center py-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 rounded-full bg-background/90 px-4 text-xs shadow-sm"
-                        disabled={isOlderMessagesLoading}
-                        onClick={() => void handleLoadOlderMessages()}
-                      >
-                        {isOlderMessagesLoading ? "Cargando mensajes..." : "Ver mensajes anteriores"}
-                      </Button>
-                    </div>
-                  )}
+                  {isOlderMessagesLoading && <ChatMessageSkeletons compact />}
                   {dedupeMessages(messages).map((item) => (
                     <MessageBubble
                       key={item.id}
@@ -4979,6 +4968,69 @@ export default function ChatPage() {
             aria-hidden="true"
             tabIndex={-1}
           />
+          {showQuickCommandMenu && (
+            <div className="absolute bottom-full left-2 right-2 z-40 mb-2 overflow-hidden rounded-2xl border border-border bg-background shadow-2xl md:left-3 md:right-auto md:w-[440px]">
+              <div className="flex items-center gap-2 border-b border-border px-4 py-2.5 text-xs font-semibold text-muted-foreground">
+                <BoltIcon className="h-4 w-4 text-blue-500" />
+                Mensajes rapidos
+              </div>
+              {quickMessagesLoading ? (
+                <p className="px-4 py-4 text-sm text-muted-foreground">Cargando comandos...</p>
+              ) : matchingQuickMessages.length === 0 ? (
+                <p className="px-4 py-4 text-sm text-muted-foreground">No hay comandos para “/{quickCommandQuery}”.</p>
+              ) : (
+                <div className="max-h-[min(55vh,480px)] overflow-y-auto p-1.5">
+                  {matchingQuickMessages.map((command, index) => {
+                    const commandText = command.blocks
+                      .map((block) => block.body?.trim())
+                      .filter(Boolean)
+                      .join("\n\n");
+                    const commandImages = command.blocks.filter(
+                      (block) => block.type === "IMAGE" && block.mediaUrl,
+                    );
+
+                    return (
+                      <button
+                        key={command.id}
+                        type="button"
+                        disabled={isQuickMessageSending}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => void sendQuickMessage(command)}
+                        className={cn(
+                          "mb-1 flex w-full flex-col rounded-xl px-3 py-3 text-left transition-colors last:mb-0 disabled:cursor-wait disabled:opacity-60",
+                          index === quickCommandIndex ? "bg-blue-50 dark:bg-blue-500/10" : "hover:bg-muted",
+                        )}
+                      >
+                        <span className="flex w-full items-center justify-between gap-3">
+                          <span className="font-mono text-sm font-bold text-foreground">/{command.keyword}</span>
+                          <span className="shrink-0 text-[10px] font-semibold text-muted-foreground">
+                            {command.blocks.length} bloque{command.blocks.length === 1 ? "" : "s"}
+                          </span>
+                        </span>
+                        {commandText && (
+                          <span className="mt-1.5 whitespace-pre-wrap break-words text-xs leading-5 text-muted-foreground">
+                            {commandText}
+                          </span>
+                        )}
+                        {commandImages.length > 0 && (
+                          <span className="mt-2 flex w-full flex-wrap gap-2">
+                            {commandImages.map((block) => (
+                              <AuthenticatedImageThumbnail
+                                key={block.id}
+                                src={block.mediaUrl}
+                                alt={block.fileName || "Imagen del comando"}
+                                className="h-12 w-12 rounded-lg border border-border bg-muted bg-cover bg-center bg-no-repeat shadow-sm"
+                              />
+                            ))}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
           {replyComposer}
           <div className="relative z-10 md:hidden">
             {isMobileRecording ? (
@@ -4987,7 +5039,7 @@ export default function ChatPage() {
                   type="button"
                   onClick={() => handleStopMobileAudioRecording("cancel")}
                   className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-red-500 transition-colors active:bg-red-500/10"
-                  aria-label="Cancelar grabaciÃƒÂ³n"
+                  aria-label="Cancelar grabación"
                 >
                   <TrashIcon className="h-5 w-5" />
                 </button>
@@ -5667,32 +5719,7 @@ export default function ChatPage() {
         </div>
       </div>
     )}
-    {whatsappBlocked && whatsappConnection && (
-      <div className="absolute inset-0 z-[70] flex items-center justify-center bg-blue-600/20 p-5 backdrop-blur-md">
-        <div className="w-full max-w-md rounded-2xl border border-blue-200/70 bg-white/95 p-6 text-center shadow-2xl dark:border-blue-400/20 dark:bg-slate-950/95">
-          <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300">
-            <ExclamationTriangleIcon className="h-6 w-6" />
-          </span>
-          <h2 className="mt-4 text-lg font-bold text-slate-950 dark:text-white">
-            {whatsappConnection.phoneChanged ? "WhatsApp cambio de numero" : "WhatsApp esta desconectado"}
-          </h2>
-          <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">
-            {whatsappConnection.phoneChanged
-              ? "Las respuestas estan bloqueadas hasta que un administrador confirme el nuevo numero."
-              : "Vuelve a conectar la sesion para recibir y responder mensajes desde el CRM."}
-          </p>
-          {whatsappConnection.phoneChanged && (
-            <div className="mt-4 grid grid-cols-2 gap-2 rounded-xl bg-blue-50 p-3 text-left text-xs dark:bg-blue-500/10">
-              <div><p className="text-slate-500 dark:text-slate-400">Numero anterior</p><p className="mt-1 font-semibold text-slate-900 dark:text-white">{whatsappConnection.previousConnectedNumber || "No disponible"}</p></div>
-              <div><p className="text-slate-500 dark:text-slate-400">Numero nuevo</p><p className="mt-1 font-semibold text-slate-900 dark:text-white">{whatsappConnection.connectedNumber || "No disponible"}</p></div>
-            </div>
-          )}
-          <Link href="/conexiones" className="mt-5 inline-flex h-11 items-center justify-center rounded-xl bg-blue-600 px-5 text-sm font-bold text-white transition hover:bg-blue-700">
-            Ir a Conexiones
-          </Link>
-        </div>
       </div>
-    )}
     </section>
 
     <Dialog open={isTransferModalOpen} onOpenChange={setIsTransferModalOpen}>
@@ -5778,7 +5805,7 @@ export default function ChatPage() {
                         {transferUser.name}
                       </span>
                       <span className="block truncate text-xs text-muted-foreground">
-                        {transferUser.role} Ã‚Â· {transferUser.email}
+                        {transferUser.role} · {transferUser.email}
                       </span>
                     </span>
                     <span
@@ -5880,7 +5907,7 @@ export default function ChatPage() {
             <DialogTitle>Eliminar chat</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Se eliminarÃƒÂ¡ esta conversaciÃƒÂ³n completa, incluidos sus mensajes, imÃƒÂ¡genes, audios y archivos. Esta acciÃƒÂ³n no se puede deshacer.
+            Se eliminará esta conversación completa, incluidos sus mensajes, imágenes, audios y archivos. Esta acción no se puede deshacer.
           </p>
         </div>
         <div className="mt-6 flex justify-end gap-2 border-t border-border bg-muted/30 px-6 py-4">
@@ -6023,6 +6050,27 @@ export default function ChatPage() {
         </div>
       </DialogContent>
     </Dialog>
+
     </>
+  );
+}
+
+export default function ChatPage() {
+  const { user } = useAuth();
+  const isAdmin = isCrmAdmin(user?.rol);
+  const isWarehouse = isWarehouseUser(user?.rol);
+  const searchParams = useSearchParams();
+  const area = isWarehouse
+    ? "shipping"
+    : isAdmin && searchParams.get("area") === "shipping"
+      ? "shipping"
+      : "sales";
+
+  if (!isAdmin && !isWarehouse) return <SalesChatPage />;
+
+  return (
+    <div className="h-full min-h-0 bg-background">
+      {area === "sales" ? <SalesChatPage key="sales" /> : <ShippingChatPanel key="shipping" />}
+    </div>
   );
 }

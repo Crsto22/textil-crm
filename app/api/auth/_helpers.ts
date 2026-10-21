@@ -16,11 +16,19 @@ export function forwardCookies(backendRes: Response, nextRes: NextResponse): voi
   for (const raw of setCookieHeaders) {
     const parsed = parseSetCookie(raw)
     if (parsed) {
+      if (parsed.name === "refresh_token") {
+        // Las rutas BFF protegidas viven fuera de /api/auth (CRM, Almacen, etc.).
+        // La cookie sigue siendo HttpOnly y SameSite, pero debe llegar a esos proxies.
+        parsed.options.path = "/"
+      }
       const migrateRefreshCookie = parsed.name === "refresh_token" && process.env.COOKIE_DOMAIN
       if (migrateRefreshCookie) {
         parsed.options.domain = process.env.COOKIE_DOMAIN
       }
       nextRes.cookies.set(parsed.name, parsed.value, parsed.options)
+      if (parsed.name === "refresh_token") {
+        appendRefreshTokenDeletion(nextRes, "/api/auth", parsed.options.domain)
+      }
       if (migrateRefreshCookie) {
         appendHostRefreshTokenDeletion(nextRes, parsed.options.path)
       }
@@ -43,13 +51,21 @@ export function clearRefreshTokenCookie(nextRes: NextResponse): void {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
-    path: "/api/auth",
+    path: "/",
     maxAge: 0,
     ...(process.env.COOKIE_DOMAIN ? { domain: process.env.COOKIE_DOMAIN } : {}),
   })
+  appendRefreshTokenDeletion(nextRes, "/api/auth", process.env.COOKIE_DOMAIN)
   if (process.env.COOKIE_DOMAIN) {
     appendHostRefreshTokenDeletion(nextRes)
   }
+}
+
+function appendRefreshTokenDeletion(nextRes: NextResponse, path: string, domain?: string): void {
+  const attributes = ["refresh_token=", `Path=${path}`, "Max-Age=0", "HttpOnly", "SameSite=Lax"]
+  if (process.env.NODE_ENV === "production") attributes.push("Secure")
+  if (domain) attributes.push(`Domain=${domain}`)
+  nextRes.headers.append("Set-Cookie", attributes.join("; "))
 }
 
 export function clearSessionUserCookie(nextRes: NextResponse): void {

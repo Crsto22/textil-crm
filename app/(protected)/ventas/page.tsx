@@ -998,7 +998,7 @@ export default function CrmSalesPage() {
                 id="sales-search-mobile"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Buscar comprobante"
+                placeholder="Comprobante, celular o cliente"
                 className="h-10 pl-9"
               />
             </div>
@@ -1104,10 +1104,10 @@ export default function CrmSalesPage() {
 
           <div className="hidden grid-cols-2 gap-2.5 sm:grid sm:gap-3 xl:grid-cols-12">
             <div className="col-span-2 space-y-1.5 xl:col-span-4">
-              <Label htmlFor="sales-search" className="text-xs text-muted-foreground">Comprobante</Label>
+              <Label htmlFor="sales-search" className="text-xs text-muted-foreground">Buscar venta</Label>
               <div className="relative">
                 <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input id="sales-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar por número de comprobante" className="h-10 pl-9" />
+                <Input id="sales-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Comprobante, celular o nombre del cliente" className="h-10 pl-9" />
               </div>
             </div>
 

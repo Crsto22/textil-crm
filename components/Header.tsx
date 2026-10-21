@@ -122,6 +122,7 @@ export function Header({ onMenuToggle, showMenuButton = true }: HeaderProps) {
 
   const changeChatArea = (area: "sales" | "shipping") => {
     const params = new URLSearchParams(searchParams.toString());
+    params.delete("conversationId");
     if (area === "shipping") params.set("area", "shipping");
     else params.delete("area");
     const query = params.toString();

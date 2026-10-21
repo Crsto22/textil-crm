@@ -1,6 +1,5 @@
 "use client"
 
-import { KimentsLogo } from "@/components/KimentsLogo"
 import { cn } from "@/lib/utils"
 
 type SpinnerSize = "xs" | "sm" | "md" | "lg"
@@ -18,13 +17,11 @@ interface LoaderSpinnerProps {
   className?: string
 }
 
-export function LoaderSpinner({ size = "md", className }: LoaderSpinnerProps) {
+export function LoaderSpinner({ size = "md", text, className }: LoaderSpinnerProps) {
   const cfg = SIZE[size]
 
   return (
-    <div className={cn("flex flex-col items-center justify-center gap-3", className)}>
-      <KimentsLogo size="sm" />
-
+    <div className={cn("flex flex-col items-center justify-center gap-2.5", className)} role="status" aria-live="polite">
       <div className={cn("flex items-center", cfg.gap)} aria-hidden="true">
         <span
           className={cn("block animate-pulse rounded-full bg-blue-500 dark:bg-blue-400", cfg.dot)}
@@ -36,6 +33,7 @@ export function LoaderSpinner({ size = "md", className }: LoaderSpinnerProps) {
           className={cn("block animate-pulse rounded-full bg-blue-500 [animation-delay:300ms] dark:bg-blue-400", cfg.dot)}
         />
       </div>
+      {text ? <p className="text-xs font-medium text-muted-foreground">{text}</p> : null}
     </div>
   )
 }

@@ -16,12 +16,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/lib/auth/auth-context";
+import { isWarehouseOnlyUser } from "@/lib/auth/roles";
 
 export function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const { isAuthenticated, isLoading: isAuthLoading, login } = useAuth();
+  const { user, isAuthenticated, isLoading: isAuthLoading, login } = useAuth();
   const router = useRouter();
 
   const systemVersion = "v1.0.0";
@@ -33,9 +34,9 @@ export function Login() {
 
   useEffect(() => {
     if (!isAuthLoading && isAuthenticated) {
-      router.replace("/chat");
+      router.replace(isWarehouseOnlyUser(user?.rol) ? "/chat?area=shipping" : "/chat");
     }
-  }, [isAuthLoading, isAuthenticated, router]);
+  }, [isAuthLoading, isAuthenticated, router, user?.rol]);
 
   useEffect(() => {
     try {
@@ -60,7 +61,6 @@ export function Login() {
 
     if (result.ok) {
       toast.success("Sesion iniciada correctamente");
-      router.push("/chat");
     } else {
       toast.error(result.message ?? "Error al iniciar sesion");
     }

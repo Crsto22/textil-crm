@@ -7,7 +7,7 @@ import { Header } from "@/components/Header";
 import { Sidebar, navSections } from "@/components/Sidebar";
 import { LoaderOverlay } from "@/components/ui/loader-overlay";
 import { useAuth } from "@/lib/auth/auth-context";
-import { canAccessCrmPath, hasCrmAccess, isCrmAdmin } from "@/lib/auth/roles";
+import { canAccessCrmPath, hasCrmAccess, isCrmAdmin, isWarehouseOnlyUser } from "@/lib/auth/roles";
 import { cn } from "@/lib/utils";
 
 function MobileBottomNav({ hidden, isAdmin, user }: { hidden: boolean; isAdmin: boolean; user: { rol?: string | null; accesoCrm?: boolean } | null }) {
@@ -77,6 +77,7 @@ export default function ProtectedLayout({ children }: { children: ReactNode }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(isChatPage);
   const previousPathnameRef = useRef(pathname);
   const userIsAdmin = isCrmAdmin(user?.rol);
+  const userIsWarehouseOnly = isWarehouseOnlyUser(user?.rol);
 
   useEffect(() => {
     if (isLoading) return;
@@ -91,10 +92,15 @@ export default function ProtectedLayout({ children }: { children: ReactNode }) {
       return;
     }
 
-    if (!canAccessCrmPath(user, pathname)) {
-      router.replace(user?.rol === "ALMACEN" ? "/envios" : "/chat");
+    if (userIsWarehouseOnly && pathname === "/envios") {
+      router.replace("/chat?area=shipping");
+      return;
     }
-  }, [isLoading, isAuthenticated, user, userIsAdmin, pathname, router]);
+
+    if (!canAccessCrmPath(user, pathname)) {
+      router.replace(userIsWarehouseOnly ? "/chat?area=shipping" : "/chat");
+    }
+  }, [isLoading, isAuthenticated, user, userIsAdmin, userIsWarehouseOnly, pathname, router]);
 
   useEffect(() => {
     if (pathname === previousPathnameRef.current) return;
@@ -125,7 +131,8 @@ export default function ProtectedLayout({ children }: { children: ReactNode }) {
 
   if (isLoading) return <LoaderOverlay />;
   if (!isAuthenticated || !hasCrmAccess(user)) return null;
-  if (!canAccessCrmPath(user, pathname)) return <LoaderOverlay />;
+  if (userIsWarehouseOnly && pathname === "/envios") return null;
+  if (!canAccessCrmPath(user, pathname)) return null;
 
   return (
     <div className="flex h-screen overflow-hidden">

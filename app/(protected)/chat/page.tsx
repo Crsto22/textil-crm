@@ -69,7 +69,7 @@ import { ShippingChatPanel } from "@/components/chat/ShippingChatPanel";
 import { Button } from "@/components/ui/button";
 import { authFetch } from "@/lib/auth/auth-fetch";
 import { useAuth } from "@/lib/auth/auth-context";
-import { isCrmAdmin, isWarehouseUser } from "@/lib/auth/roles";
+import { isCrmAdmin, isWarehouseOnlyUser, isWarehouseUser } from "@/lib/auth/roles";
 import { cn } from "@/lib/utils";
 import {
   Dialog,
@@ -6077,10 +6077,11 @@ export default function ChatPage() {
   const { user } = useAuth();
   const isAdmin = isCrmAdmin(user?.rol);
   const isWarehouse = isWarehouseUser(user?.rol);
+  const isWarehouseOnly = isWarehouseOnlyUser(user?.rol);
   const searchParams = useSearchParams();
-  const area = isWarehouse
+  const area = isWarehouseOnly
     ? "shipping"
-    : isAdmin && searchParams.get("area") === "shipping"
+    : (isAdmin || isWarehouse) && searchParams.get("area") === "shipping"
       ? "shipping"
       : "sales";
 

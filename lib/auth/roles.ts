@@ -16,6 +16,10 @@ export function isWarehouseUser(role: string | null | undefined): boolean {
   return normalized === "ALMACEN" || normalized === "VENTAS_ALMACEN"
 }
 
+export function isWarehouseOnlyUser(role: string | null | undefined): boolean {
+  return role?.trim().toUpperCase() === "ALMACEN"
+}
+
 export function canAccessCrmPath(
   user: { rol?: string | null; accesoCrm?: boolean } | null | undefined,
   pathname: string,

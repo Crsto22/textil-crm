@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Fragment,
   useCallback,
   useEffect,
   useRef,
@@ -58,6 +59,7 @@ import type { PDFDocumentLoadingTask, RenderTask } from "pdfjs-dist";
 import { toast } from "sonner";
 
 import { ChatAvatar } from "@/components/chat/ChatAvatar";
+import { ChatDateSeparator } from "@/components/chat/ChatDateSeparator";
 import { AuthenticatedImageThumbnail } from "@/components/chat/AuthenticatedImageThumbnail";
 import type { ChatMessage, Conversation } from "@/components/chat/chat-data";
 import { ChatWallpaperLayer } from "@/components/chat/ChatWallpaperLayer";
@@ -77,6 +79,11 @@ import {
 } from "@/components/ui/dialog";
 import type { QuickMessage } from "@/lib/crm/quick-messages";
 import { readQuickMessageApiError } from "@/lib/crm/quick-messages";
+import {
+  conversationDayKey,
+  formatConversationDayLabel,
+  formatConversationListDate,
+} from "@/lib/crm/conversation-date";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -321,7 +328,7 @@ const mapConversation = (conversation: CrmConversationResponse): CrmConversation
     status: conversation.status,
     preview: conversation.lastMessage || "Sin mensajes",
     lastMessageType: conversation.lastMessageType ?? null,
-    time: formatChatTime(conversation.lastMessageAt),
+    time: formatConversationListDate(conversation.lastMessageAt),
     initials: getInitials(conversation.contactName, visiblePhone),
     active: false,
     unreadCount: conversation.unreadCount || undefined,
@@ -363,6 +370,7 @@ const mapMessage = (
       type: "system",
       text: message.body || "",
       time: formatChatTime(message.createdAt),
+      createdAt: message.createdAt,
       status: message.status || "sent",
       deleted: Boolean(message.deleted),
       relatedSaleId: message.relatedSaleId ?? null,
@@ -400,6 +408,7 @@ const mapMessage = (
       ? "No se puede abrir este mensaje porque fue enviado para ver una sola vez."
       : hasMedia ? mediaFileName || bodyText : bodyText,
     time: formatChatTime(message.createdAt),
+    createdAt: message.createdAt,
     status: message.status || "sent",
     fileType: message.mediaMimeType || undefined,
     fileUrl: mediaObjectUrl ?? message.mediaUrl ?? undefined,
@@ -3813,6 +3822,7 @@ function SalesChatPage() {
     const conversationId = activeConversationId;
     const currentReply = replyTarget;
     const pendingId = `pending-audio-${getTimestamp()}`;
+    const pendingCreatedAt = new Date().toISOString();
     const audioType = blob.type || "audio/ogg;codecs=opus";
     const file = new File([blob], `audio-${getTimestamp()}.${getAudioFileExtension(audioType)}`, {
       type: audioType,
@@ -3832,6 +3842,7 @@ function SalesChatPage() {
         type: "outgoing-audio",
         text: "Audio",
         time: getMessageTime(),
+        createdAt: pendingCreatedAt,
         status: "accepted",
         audioUrl,
         duration,
@@ -3915,11 +3926,13 @@ function SalesChatPage() {
 
     const currentReply = replyTarget;
     const pendingId = `pending-${getTimestamp()}`;
+    const pendingCreatedAt = new Date().toISOString();
     const pendingMessage: ChatMessage = {
       id: pendingId,
       type: "outgoing",
       text,
       time: getMessageTime(),
+      createdAt: pendingCreatedAt,
       status: "accepted",
       retryText: text,
       replyTo: currentReply ? buildReplyQuote(currentReply) : null,
@@ -4225,6 +4238,7 @@ function SalesChatPage() {
     }
 
     const sentAt = getMessageTime();
+    const sentCreatedAt = new Date().toISOString();
     const caption = attachmentCaption.trim();
     const sentAttachments = pendingAttachments;
     const conversationId = activeConversationId;
@@ -4239,6 +4253,7 @@ function SalesChatPage() {
       type: "outgoing-file" as const,
       text: attachment.name,
       time: sentAt,
+      createdAt: sentCreatedAt,
       status: "accepted" as const,
       fileSize: attachment.size,
       fileType: attachment.type,
@@ -4928,18 +4943,30 @@ function SalesChatPage() {
               ) : (
                 <>
                   {isOlderMessagesLoading && <ChatMessageSkeletons compact />}
-                  {dedupeMessages(messages).map((item) => (
-                    <MessageBubble
-                      key={item.id}
-                      item={item}
-                      onOpenImagePreview={setImagePreview}
-                      onRetry={retryMessage}
-                      onReply={handleReplyToMessage}
-                      onDelete={handleDeleteMessage}
-                      deleting={deletingMessageId === item.id}
-                      onSendReceipt={sendSaleReceipt}
-                    />
-                  ))}
+                  {dedupeMessages(messages).map((item, index, visibleMessages) => {
+                    const previousMessage = index > 0 ? visibleMessages[index - 1] : null;
+                    const showDateSeparator = Boolean(
+                      item.createdAt
+                      && conversationDayKey(item.createdAt) !== conversationDayKey(previousMessage?.createdAt),
+                    );
+
+                    return (
+                      <Fragment key={item.id}>
+                        {showDateSeparator && (
+                          <ChatDateSeparator label={formatConversationDayLabel(item.createdAt)} />
+                        )}
+                        <MessageBubble
+                          item={item}
+                          onOpenImagePreview={setImagePreview}
+                          onRetry={retryMessage}
+                          onReply={handleReplyToMessage}
+                          onDelete={handleDeleteMessage}
+                          deleting={deletingMessageId === item.id}
+                          onSendReceipt={sendSaleReceipt}
+                        />
+                      </Fragment>
+                    );
+                  })}
                 </>
               )}
               <div ref={messagesEndRef} />

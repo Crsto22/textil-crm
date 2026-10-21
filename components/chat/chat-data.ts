@@ -31,6 +31,7 @@ export type ChatMessage = {
     | "incoming";
   text: string;
   time: string;
+  createdAt?: string | null;
   audioUrl?: string;
   duration?: number;
   fileSize?: number;

@@ -35,6 +35,48 @@ import { cn } from "@/lib/utils"
 
 type ReviewFilter = "ALL" | "PENDING" | "ACCEPTED" | "REJECTED"
 
+const SALES_VIEW_PREFERENCES_KEY = "crm.sales.view-preferences.v1"
+const SALES_PERIODS = new Set(["TODAY", "WEEK", "MONTH", "ALL", "CUSTOM"])
+
+interface SalesViewPreferences {
+  period: string
+  fromDate: string
+  toDate: string
+  quickDateSelected: boolean
+  order: "DESC" | "ASC"
+}
+
+function isDateInputValue(value: unknown): value is string {
+  return typeof value === "string" && (/^\d{4}-\d{2}-\d{2}$/.test(value) || value === "")
+}
+
+function readSalesViewPreferences(): SalesViewPreferences | null {
+  try {
+    const stored = window.localStorage.getItem(SALES_VIEW_PREFERENCES_KEY)
+    if (!stored) return null
+
+    const value = JSON.parse(stored) as Partial<SalesViewPreferences>
+    if (
+      typeof value.period !== "string"
+      || !SALES_PERIODS.has(value.period)
+      || !isDateInputValue(value.fromDate)
+      || !isDateInputValue(value.toDate)
+      || typeof value.quickDateSelected !== "boolean"
+      || (value.order !== "DESC" && value.order !== "ASC")
+    ) return null
+
+    return {
+      period: value.period,
+      fromDate: value.fromDate,
+      toDate: value.toDate,
+      quickDateSelected: value.quickDateSelected,
+      order: value.order,
+    }
+  } catch {
+    return null
+  }
+}
+
 interface SaleItem {
   description: string
   quantity: number
@@ -769,6 +811,7 @@ export default function CrmSalesPage() {
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [source, setSource] = useState("ALL")
   const [order, setOrder] = useState<"DESC" | "ASC">("DESC")
+  const [preferencesRestored, setPreferencesRestored] = useState(false)
   const [openingChatId, setOpeningChatId] = useState<number | null>(null)
   const [page, setPage] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -794,6 +837,39 @@ export default function CrmSalesPage() {
       }
     })
   }, [])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const savedPreferences = readSalesViewPreferences()
+      if (savedPreferences) {
+        setPeriod(savedPreferences.period)
+        setFromDate(savedPreferences.fromDate)
+        setToDate(savedPreferences.toDate)
+        setQuickDateSelected(savedPreferences.quickDateSelected)
+        setOrder(savedPreferences.order)
+      }
+      setPreferencesRestored(true)
+    }, 0)
+
+    return () => window.clearTimeout(timer)
+  }, [])
+
+  useEffect(() => {
+    if (!preferencesRestored) return
+    const preferences: SalesViewPreferences = {
+      period,
+      fromDate,
+      toDate,
+      quickDateSelected,
+      order,
+    }
+
+    try {
+      window.localStorage.setItem(SALES_VIEW_PREFERENCES_KEY, JSON.stringify(preferences))
+    } catch {
+      // La vista sigue funcionando aunque el navegador no permita almacenamiento local.
+    }
+  }, [fromDate, order, period, preferencesRestored, quickDateSelected, toDate])
 
   useEffect(() => {
     const scroller = daysScrollerRef.current
@@ -870,9 +946,10 @@ export default function CrmSalesPage() {
   }
 
   useEffect(() => {
+    if (!preferencesRestored) return
     const timer = window.setTimeout(() => void load(), 0)
     return () => window.clearTimeout(timer)
-  }, [load])
+  }, [load, preferencesRestored])
 
   useEffect(() => {
     const target = loadMoreRef.current

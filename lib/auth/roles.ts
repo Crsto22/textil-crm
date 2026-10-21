@@ -1,5 +1,6 @@
 export const ADMIN_ROLE = "ADMINISTRADOR"
 export const CRM_STANDARD_USER_PATHS = ["/chat", "/comandos", "/ventas", "/contacto", "/etiquetas"] as const
+export const COMMANDS_PATH = "/comandos"
 export const WAREHOUSE_PATH = "/envios"
 
 export function isCrmAdmin(role: string | null | undefined): boolean {
@@ -20,11 +21,14 @@ export function canAccessCrmPath(
   pathname: string,
 ): boolean {
   if (isCrmAdmin(user?.rol)) return true
+  const normalizedRole = user?.rol?.trim().toUpperCase()
+  if (pathname === COMMANDS_PATH || pathname.startsWith(`${COMMANDS_PATH}/`)) {
+    return normalizedRole === "VENTAS" || normalizedRole === "VENTAS_ALMACEN"
+  }
   if (pathname === WAREHOUSE_PATH || pathname.startsWith(`${WAREHOUSE_PATH}/`)) {
     return isWarehouseUser(user?.rol)
   }
   if (isWarehouseUser(user?.rol) && pathname === "/chat") return true
-  const normalizedRole = user?.rol?.trim().toUpperCase()
   if (normalizedRole === "VENTAS" && (pathname === "/ventas" || pathname.startsWith("/ventas/"))) return true
   if (isWarehouseUser(normalizedRole) && (pathname === "/ventas" || pathname.startsWith("/ventas/"))) return true
   return user?.accesoCrm === true && isCrmStandardUserPath(pathname)

@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState, type DragEvent, type UIEvent } from "react"
+import { Fragment, useCallback, useEffect, useRef, useState, type DragEvent, type UIEvent } from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import {
@@ -20,8 +20,10 @@ import {
 } from "@heroicons/react/24/outline"
 
 import { ChatAvatar } from "@/components/chat/ChatAvatar"
+import { ChatDateSeparator } from "@/components/chat/ChatDateSeparator"
 import { ChatConversationSkeletons, ChatMessageSkeletons } from "@/components/chat/ChatLoadingSkeletons"
 import { ChatWallpaperLayer } from "@/components/chat/ChatWallpaperLayer"
+import { conversationDayKey, formatConversationDayLabel, formatConversationListDate } from "@/lib/crm/conversation-date"
 import { WarehouseChatComposer } from "@/components/chat/WarehouseChatComposer"
 import { WarehouseMessageBubble, type WarehouseChatMessage } from "@/components/chat/WarehouseMessageBubble"
 import { Button } from "@/components/ui/button"
@@ -86,13 +88,6 @@ function contactPhone(conversation: ShippingConversation) {
   return conversation.phoneNumber?.trim()
     || conversation.whatsappUsername?.trim()
     || conversation.phone.replace(/@.+$/, "")
-}
-
-function chatTime(value?: string | null) {
-  if (!value) return ""
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ""
-  return new Intl.DateTimeFormat("es-PE", { hour: "2-digit", minute: "2-digit" }).format(date)
 }
 
 function fileSize(bytes: number) {
@@ -767,7 +762,7 @@ export function ShippingChatPanel() {
               <div className="min-w-0 flex-1">
                 <div className="flex items-start justify-between gap-2">
                   <p className="min-w-0 flex-1 truncate text-sm font-semibold">{contactName(conversation)}</p>
-                  <span className="shrink-0 text-[11px] text-foreground">{chatTime(conversation.lastMessageAt)}</span>
+                  <span className="shrink-0 text-[11px] text-foreground">{formatConversationListDate(conversation.lastMessageAt)}</span>
                 </div>
                 <div className="mt-1 flex items-center gap-2">
                   <p className={cn("min-w-0 flex-1 truncate text-xs", conversation.unreadCount > 0 ? "font-semibold text-foreground" : "text-muted-foreground")}>
@@ -880,12 +875,26 @@ export function ShippingChatPanel() {
                           <ChatBubbleLeftRightIcon className="mx-auto h-10 w-10 text-muted-foreground/40" />
                           <p className="mt-3 text-sm font-semibold">Aún no hay mensajes de Ventas</p>
                         </div>
-                      ) : salesMessages.map((message) => <WarehouseMessageBubble key={message.id} message={message} />)}
+                      ) : salesMessages.map((message, index) => (
+                        <Fragment key={message.id}>
+                          {conversationDayKey(message.createdAt) !== conversationDayKey(salesMessages[index - 1]?.createdAt) && (
+                            <ChatDateSeparator label={formatConversationDayLabel(message.createdAt)} />
+                          )}
+                          <WarehouseMessageBubble message={message} />
+                        </Fragment>
+                      ))}
                     </>
                   ) : loadingMessages && messages.length === 0 ? <ChatMessageSkeletons /> : (
                     <>
                       {loadingOlder && <ChatMessageSkeletons compact />}
-                      {messages.map((message) => <WarehouseMessageBubble key={message.id} message={message} />)}
+                      {messages.map((message, index) => (
+                        <Fragment key={message.id}>
+                          {conversationDayKey(message.createdAt) !== conversationDayKey(messages[index - 1]?.createdAt) && (
+                            <ChatDateSeparator label={formatConversationDayLabel(message.createdAt)} />
+                          )}
+                          <WarehouseMessageBubble message={message} />
+                        </Fragment>
+                      ))}
                     </>
                   )}
                 </div>

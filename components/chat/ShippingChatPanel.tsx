@@ -813,6 +813,24 @@ export function ShippingChatPanel() {
               <div className="hidden items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-200 sm:flex">
                 <TruckIcon className="h-4 w-4" /> Envíos
               </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                disabled={chatTab === "sales" ? salesLoading : loadingMessages}
+                onClick={() => {
+                  if (chatTab === "sales") void loadSalesMessages(selected.id)
+                  else void loadMessages(selected.id)
+                }}
+                className="h-9 w-9 shrink-0 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
+                aria-label={chatTab === "sales" ? "Recargar historial de Ventas" : "Recargar mensajes de Envíos"}
+                title={chatTab === "sales" ? "Recargar historial de Ventas" : "Recargar mensajes de Envíos"}
+              >
+                <ArrowPathIcon className={cn(
+                  "h-5 w-5",
+                  (chatTab === "sales" ? salesLoading : loadingMessages) && "animate-spin",
+                )} />
+              </Button>
             </header>
 
             <div className="z-10 grid shrink-0 grid-cols-2 border-b border-border bg-background">

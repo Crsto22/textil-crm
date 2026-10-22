@@ -73,7 +73,7 @@ type PendingAttachment = {
   url: string
 }
 
-const CONVERSATION_SIZE = 10
+const CONVERSATION_SIZE = 50
 const MESSAGE_SIZE = 10
 const MESSAGE_CACHE_LIMIT = 5
 

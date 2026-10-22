@@ -32,6 +32,8 @@ export type WarehouseChatMessage = {
   mediaDurationSeconds?: number | null
   relatedSaleId?: number | null
   receiptFormat?: string | null
+  sentByUserId?: number | null
+  sentByName?: string | null
   deleted: boolean
 }
 
@@ -92,6 +94,16 @@ function MessageStatusChecks({ status }: { status?: string }) {
   return <CheckIcon className="whatsapp-outgoing-check h-3 w-3" />
 }
 
+function SenderLabel({ message }: { message: WarehouseChatMessage }) {
+  if (message.direction !== "OUTGOING") return null
+  const label = message.sentByName?.trim()
+    ? `Enviado por ${message.sentByName.trim()}`
+    : message.origin === "EXTERNAL"
+      ? "Enviado desde WhatsApp de Envíos"
+      : "Equipo de Envíos"
+  return <p className="mb-1 text-[10px] font-semibold text-emerald-700/80 dark:text-emerald-300/80">{label}</p>
+}
+
 function AudioMessage({ message, outgoing }: { message: WarehouseChatMessage; outgoing: boolean }) {
   const audioRef = useRef<HTMLAudioElement>(null)
   const [requested, setRequested] = useState(false)
@@ -129,8 +141,19 @@ function AudioMessage({ message, outgoing }: { message: WarehouseChatMessage; ou
     if (audio.paused) { void audio.play(); setPlaying(true) } else { audio.pause(); setPlaying(false) }
   }
 
+  if (!message.mediaUrl) {
+    return (
+      <div className={cn("w-fit max-w-[88%] rounded-md px-3 py-3 text-sm shadow-sm md:max-w-[55%]", outgoing ? "whatsapp-outgoing-bubble ml-auto" : "mr-auto border border-border bg-card text-card-foreground")}>
+        <SenderLabel message={message} />
+        <div className="flex items-center gap-3 text-muted-foreground"><MicrophoneIcon className="h-6 w-6" /><span>Audio histórico no disponible</span></div>
+        <p className={cn("mt-1 flex items-center justify-end gap-1 text-[10px]", outgoing ? "whatsapp-outgoing-meta" : "text-muted-foreground")}>{chatTime(message.createdAt)} {outgoing && <MessageStatusChecks status={message.status} />}</p>
+      </div>
+    )
+  }
+
   return (
     <div className={cn("w-fit max-w-[88%] rounded-md px-3 py-3 text-sm shadow-sm md:max-w-[55%] md:min-w-[330px]", outgoing ? "whatsapp-outgoing-bubble ml-auto" : "mr-auto border border-border bg-card text-card-foreground")}>
+      <SenderLabel message={message} />
       <audio ref={audioRef} src={media.url} preload="none" />
       <div className="flex items-center gap-3">
         {outgoing && <div className="relative h-10 w-10 shrink-0"><span className="flex h-10 w-10 items-center justify-center rounded-full bg-black/10"><UserIcon className="h-5 w-5" /></span><span className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 text-white"><MicrophoneIcon className="h-3 w-3" /></span></div>}
@@ -201,6 +224,7 @@ export function WarehouseMessageBubble({ message }: { message: WarehouseChatMess
 
   return <>
     <div className={cn("w-fit max-w-[88%] rounded-md text-sm shadow-sm md:max-w-[55%]", outgoing ? "whatsapp-outgoing-bubble ml-auto" : "mr-auto bg-card text-card-foreground", message.mediaUrl ? "p-1.5" : "px-3 py-3")}>
+      <SenderLabel message={message} />
       {message.deleted ? (
         <p className="px-1 py-1 italic text-muted-foreground">Mensaje eliminado</p>
       ) : isImage && message.mediaUrl ? (
@@ -214,6 +238,11 @@ export function WarehouseMessageBubble({ message }: { message: WarehouseChatMess
         <button type="button" onClick={() => media.url && window.open(media.url, "_blank", "noopener,noreferrer")} className="flex w-[min(76vw,330px)] items-center gap-3 rounded bg-black/10 px-3 py-3 text-left dark:bg-white/10">
           <DocumentIcon className="h-9 w-9 shrink-0" /><span className="min-w-0 flex-1 break-all font-semibold">{filename}</span><ArrowDownTrayIcon className="h-5 w-5 shrink-0" />
         </button>
+      ) : message.mediaFileName ? (
+        <div className="flex w-[min(76vw,330px)] items-center gap-3 rounded bg-black/5 px-3 py-3 text-left text-muted-foreground dark:bg-white/5">
+          <DocumentIcon className="h-9 w-9 shrink-0" />
+          <span className="min-w-0 flex-1"><span className="block break-all font-semibold">{filename}</span><span className="text-xs">Adjunto histórico no disponible</span></span>
+        </div>
       ) : null}
       {message.body && message.body !== message.mediaFileName && !message.deleted && <p className={cn("whitespace-pre-wrap break-words leading-relaxed", message.mediaUrl && "px-1 pt-2")}>{message.body}</p>}
       {media.failed && <button type="button" onClick={media.retry} className="m-2 flex items-center gap-1 text-xs text-red-500"><ArrowPathIcon className="h-3.5 w-3.5" /> Reintentar</button>}

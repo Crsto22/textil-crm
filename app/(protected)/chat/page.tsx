@@ -129,6 +129,7 @@ type CrmConversation = Conversation & {
 
 interface CrmConversationResponse {
   id: number;
+  area: "SALES" | "SHIPPING";
   phone: string;
   phoneNumber: string | null;
   whatsappUsername: string | null;
@@ -190,7 +191,7 @@ interface CrmConversationTagResponse {
 interface CrmMessageResponse {
   id: number;
   direction: "INCOMING" | "OUTGOING" | "SYSTEM";
-  origin?: "EXTERNAL" | "HUMAN" | "CRM_SYSTEM";
+  origin?: "EXTERNAL" | "HUMAN" | "CRM_SYSTEM" | "CRM_ACTIVITY" | "AI_KIMENTS";
   messageType: "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "DOCUMENT" | "MEDIA" | "STICKER" | "VIEW_ONCE";
   body: string | null;
   status: ChatMessage["status"];
@@ -208,6 +209,8 @@ interface CrmMessageResponse {
   } | null;
   deleted?: boolean;
   relatedSaleId?: number | null;
+  sentByUserId?: number | null;
+  sentByName?: string | null;
 }
 
 interface MessagePageResponse {
@@ -374,6 +377,8 @@ const mapMessage = (
       status: message.status || "sent",
       deleted: Boolean(message.deleted),
       relatedSaleId: message.relatedSaleId ?? null,
+      sentByUserId: message.sentByUserId ?? null,
+      sentByName: message.sentByName ?? null,
     };
   }
 
@@ -424,6 +429,8 @@ const mapMessage = (
         }
       : null,
     deleted: Boolean(message.deleted),
+    sentByUserId: message.sentByUserId ?? null,
+    sentByName: message.sentByName ?? null,
     sticker: isSticker,
     viewOnce: isViewOnce,
   };
@@ -1125,16 +1132,27 @@ function MessageQuotePreview({ quote }: { quote?: ChatMessage["replyTo"] }) {
   );
 }
 
+function MessageSenderLabel({ item }: { item: ChatMessage }) {
+  if (!item.sentByName) return null;
+  return (
+    <p className="mb-1 text-[10px] font-semibold text-emerald-700/80 dark:text-emerald-300/80">
+      Enviado por {item.sentByName}
+    </p>
+  );
+}
+
 function MessageActions({
   item,
   onReply,
   onDelete,
   deleting,
+  allowDelete,
 }: {
   item: ChatMessage;
   onReply?: (message: ChatMessage) => void;
   onDelete?: (message: ChatMessage) => void;
   deleting?: boolean;
+  allowDelete?: boolean;
 }) {
   const canShow = !item.deleted
     && item.type !== "date"
@@ -1146,7 +1164,7 @@ function MessageActions({
     item.type === "outgoing" ||
     item.type === "outgoing-file" ||
     item.type === "outgoing-audio";
-  const canDelete = isOutgoing;
+  const canDelete = isOutgoing && allowDelete;
   if (!canShow) return null;
 
   return (
@@ -1198,6 +1216,7 @@ function MessageBubble({
   onReply,
   onDelete,
   deleting,
+  canDelete,
   onSendReceipt,
 }: {
   item: ChatMessage;
@@ -1206,6 +1225,7 @@ function MessageBubble({
   onReply?: (message: ChatMessage) => void;
   onDelete?: (message: ChatMessage) => void;
   deleting?: boolean;
+  canDelete?: boolean;
   onSendReceipt?: (saleId: number, format: "PDF" | "TICKET") => Promise<void>;
 }) {
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -1359,6 +1379,7 @@ function MessageBubble({
       <div className={`w-fit max-w-[88%] rounded-md px-3 py-2 text-sm italic shadow-sm md:max-w-[55%] ${
         outgoing ? "whatsapp-outgoing-bubble ml-auto" : "mr-auto bg-card text-muted-foreground"
       }`}>
+        {outgoing && <MessageSenderLabel item={item} />}
         Mensaje eliminado
         <p className={`mt-2 text-right text-[10px] ${outgoing ? "whatsapp-outgoing-meta" : "text-muted-foreground"}`}>
           {item.time}
@@ -1401,10 +1422,11 @@ function MessageBubble({
       } ${isStickerAttachment ? "bg-transparent p-0 shadow-none" : "shadow-sm"} ${
         isImageAttachment || isVideoAttachment || isPdfAttachmentMessage ? "p-1.5" : "px-3 py-3"
       }`}>
+        {isOutgoingFile && <MessageSenderLabel item={item} />}
         <MessageQuotePreview quote={item.replyTo} />
         {(isImageAttachment || isVideoAttachment || isPdfAttachmentMessage) && (
           <div className="absolute right-2 top-2 z-10 rounded-full bg-background/80 backdrop-blur">
-            <MessageActions item={item} onReply={onReply} onDelete={onDelete} deleting={deleting} />
+            <MessageActions item={item} onReply={onReply} onDelete={onDelete} deleting={deleting} allowDelete={canDelete} />
           </div>
         )}
         {isImageAttachment ? (
@@ -1532,7 +1554,7 @@ function MessageBubble({
           <>
             <div className="mb-2 flex items-center justify-between gap-3 font-semibold">
               <span className="min-w-0 break-words">{isOutgoingFile ? "KIMETS:" : "Archivo"}</span>
-              <MessageActions item={item} onReply={onReply} onDelete={onDelete} deleting={deleting} />
+              <MessageActions item={item} onReply={onReply} onDelete={onDelete} deleting={deleting} allowDelete={canDelete} />
             </div>
             <div className="whatsapp-outgoing-file flex items-center gap-3 rounded px-3 py-2 text-xs font-semibold">
               <span
@@ -1591,8 +1613,9 @@ function MessageBubble({
           ? "whatsapp-outgoing-bubble outgoing-audio-bubble desktop-audio-bubble ml-auto md:shadow-[0_1px_1px_rgba(11,20,26,0.18)]"
           : "mr-auto border border-border bg-card text-card-foreground",
       )}>
+        {isOutgoingAudio && <MessageSenderLabel item={item} />}
         <div className="mb-1 flex justify-end">
-          <MessageActions item={item} onReply={onReply} onDelete={onDelete} deleting={deleting} />
+          <MessageActions item={item} onReply={onReply} onDelete={onDelete} deleting={deleting} allowDelete={canDelete} />
         </div>
         <MessageQuotePreview quote={item.replyTo} />
         <audio ref={audioRef} src={authenticatedAudioUrl} preload="none" />
@@ -1676,6 +1699,7 @@ function MessageBubble({
   if (item.type === "outgoing") {
     return (
       <div className="whatsapp-outgoing-bubble ml-auto w-fit max-w-[88%] rounded-md px-3 py-3 text-sm shadow-sm md:max-w-[55%]">
+        <MessageSenderLabel item={item} />
         <MessageQuotePreview quote={item.replyTo} />
         {item.aiGenerated && (
           <span className="mb-1 inline-flex rounded bg-blue-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-blue-700 dark:text-blue-300">
@@ -1684,7 +1708,7 @@ function MessageBubble({
         )}
         <div className="flex items-start justify-between gap-3">
           <p className="min-w-0 whitespace-pre-wrap break-words">{item.text}</p>
-          <MessageActions item={item} onReply={onReply} onDelete={onDelete} deleting={deleting} />
+          <MessageActions item={item} onReply={onReply} onDelete={onDelete} deleting={deleting} allowDelete={canDelete} />
         </div>
         <p className="whatsapp-outgoing-meta mt-4 flex items-center justify-end gap-1 text-[10px]">
           {item.status === "accepted" ? "Enviando..." : item.time}
@@ -1709,7 +1733,7 @@ function MessageBubble({
       <MessageQuotePreview quote={item.replyTo} />
       <div className="flex items-start justify-between gap-3">
         <p className="min-w-0 whitespace-pre-wrap break-words">{item.text}</p>
-        <MessageActions item={item} onReply={onReply} onDelete={onDelete} deleting={deleting} />
+        <MessageActions item={item} onReply={onReply} onDelete={onDelete} deleting={deleting} allowDelete={canDelete} />
       </div>
       <p className="mt-4 text-right text-[10px] text-muted-foreground">{item.time}</p>
     </div>
@@ -1874,7 +1898,7 @@ function SalesChatPage() {
   const handledRequestedConversationRef = useRef<string | null>(null);
   const allMessagesRef = useRef<Record<string, ChatMessage[]>>({});
   const sentAttachmentUrlsRef = useRef<string[]>([]);
-  const [activeFilter, setActiveFilter] = useState<ConversationFilter>(() => isAdmin ? "all" : "mine");
+  const [activeFilter, setActiveFilter] = useState<ConversationFilter>("all");
   const [conversationSearchInput, setConversationSearchInput] = useState("");
   const [conversationSearch, setConversationSearch] = useState("");
   const [selectedTagFilterId, setSelectedTagFilterId] = useState<string | null>(null);
@@ -1888,6 +1912,8 @@ function SalesChatPage() {
   const conversationCountsRefreshTimerRef = useRef<number | null>(null);
   const refreshConversationCountsRef = useRef<() => void>(() => undefined);
   const messageAbortRef = useRef<AbortController | null>(null);
+  const visitSessionIdRef = useRef<string | null>(null);
+  const visitedConversationIdsRef = useRef<Set<string>>(new Set());
   const [realtimeStatus, setRealtimeStatus] = useState<"connecting" | "live" | "reconnecting">("connecting");
   const [whatsappConnection, setWhatsappConnection] = useState<WhatsappConnectionState | null>(null);
   const realtimeStatusRef = useRef<"connecting" | "live" | "reconnecting">("connecting");
@@ -2198,6 +2224,36 @@ function SalesChatPage() {
         setMessages([]);
         await loadMessages(conversationId);
       }
+      if (!visitedConversationIdsRef.current.has(conversationId)) {
+        let sessionId = visitSessionIdRef.current;
+        if (!sessionId) {
+          sessionId = window.sessionStorage.getItem("crm.sales-chat.visit-session");
+          if (!sessionId) {
+            sessionId = crypto.randomUUID().replaceAll("-", "");
+            window.sessionStorage.setItem("crm.sales-chat.visit-session", sessionId);
+          }
+          visitSessionIdRef.current = sessionId;
+        }
+        visitedConversationIdsRef.current.add(conversationId);
+        try {
+          const visitResponse = await authFetch(`/api/crm/whatsapp/conversations/${conversationId}/visits`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sessionId }),
+          });
+          if (!visitResponse.ok) {
+            visitedConversationIdsRef.current.delete(conversationId);
+          } else {
+            const visitMessage = mapMessage((await visitResponse.json()) as CrmMessageResponse);
+            const current = allMessagesRef.current[conversationId] ?? [];
+            const next = dedupeMessages([...current, visitMessage]);
+            allMessagesRef.current = { ...allMessagesRef.current, [conversationId]: next };
+            if (activeConversationIdRef.current === conversationId) setMessages(next);
+          }
+        } catch {
+          visitedConversationIdsRef.current.delete(conversationId);
+        }
+      }
     } catch (error) {
       if (!allMessagesRef.current[conversationId]) setMessages([]);
       setChatError(error instanceof Error ? error.message : "No se pudieron cargar los mensajes");
@@ -2306,7 +2362,7 @@ function SalesChatPage() {
       setConversations((current) =>
         current.map((conversation) => conversation.id === conversationId ? accepted : conversation),
       );
-      setActiveFilter("mine");
+      setActiveFilter("all");
       await loadMessages(conversationId);
       toast.success("Chat aceptado. Atencion humana activada");
     } catch (error) {
@@ -2389,20 +2445,12 @@ function SalesChatPage() {
         throw new Error(await readApiMessage(response, "No se pudo transferir el chat"));
       }
       const transferredResponse = (await response.json()) as CrmConversationResponse;
-      const transferred = mapConversation(transferredResponse);
-      const remainsAccessible = isAdmin || transferred.assignedUserId === user?.idUsuario;
       realtimeEventHandlerRef.current({
-        type: remainsAccessible ? "conversation.updated" : "conversation.removed",
-        conversationId: Number(transferred.id),
+        type: "conversation.updated",
+        conversationId: transferredResponse.id,
         conversation: transferredResponse,
         message: null,
       });
-      if (!remainsAccessible) {
-        setActiveConversationId(null);
-        activeConversationIdRef.current = null;
-        setMessages([]);
-        setIsSidebarOpen(false);
-      }
       setIsTransferModalOpen(false);
     } catch (error) {
       setTransferError(error instanceof Error ? error.message : "No se pudo transferir el chat");
@@ -2462,17 +2510,18 @@ function SalesChatPage() {
       return;
     }
     if (!event.conversation) return;
+    if (event.conversation.area !== "SALES") return;
     window.dispatchEvent(new CustomEvent("crm-agent-event", { detail: event }));
     const mappedConversation = mapConversation(event.conversation);
-    refreshConversationCountsRef.current();
+    const isInternalActivity = event.message?.origin === "CRM_ACTIVITY";
+    if (!isInternalActivity) {
+      refreshConversationCountsRef.current();
+    }
     const expectedQueue: AttentionQueue = activeFilter === "agent" ? "AGENT_ACTIVE"
       : activeFilter === "mine" ? "HUMAN_ACTIVE"
       : activeFilter === "waiting" ? "ADVISOR_REQUIRED"
         : activeFilter === "resolved" ? "RESOLVED" : "HUMAN_ACTIVE";
-    const accessible = isAdmin
-      || mappedConversation.assignedUserId === user?.idUsuario
-      || (mappedConversation.status !== "RESUELTO" && !mappedConversation.assignedUserId);
-    const matchesActiveList = accessible && (activeFilter === "all"
+    const matchesActiveList = activeFilter === "all"
       ? true
       : activeFilter === "agent"
         ? mappedConversation.attentionQueue === "AGENT_ACTIVE"
@@ -2482,13 +2531,15 @@ function SalesChatPage() {
         ? !mappedConversation.assignedUserId
           && mappedConversation.status !== "RESUELTO"
           && mappedConversation.attentionQueue !== "AGENT_ACTIVE"
-        : mappedConversation.attentionQueue === expectedQueue);
+        : mappedConversation.attentionQueue === expectedQueue;
 
     setConversations((current) => {
       const exists = current.some((item) => item.id === mappedConversation.id);
       let next = current.filter((item) => item.id !== mappedConversation.id);
       if (event.type !== "conversation.removed" && matchesActiveList && (exists || (!conversationSearch && !selectedTagFilterId))) {
-        next = [mappedConversation, ...next].slice(0, Math.max(CONVERSATION_PAGE_SIZE, current.length));
+        next = isInternalActivity && exists
+          ? current.map((item) => item.id === mappedConversation.id ? mappedConversation : item)
+          : [mappedConversation, ...next].slice(0, Math.max(CONVERSATION_PAGE_SIZE, current.length));
       }
       conversationsRef.current = next;
       return next;
@@ -2513,19 +2564,11 @@ function SalesChatPage() {
             : mappedConversation.attentionQueue === ({ ATTENDED: "HUMAN_ACTIVE", RESOLVED: "RESOLVED" } as Record<string, AttentionQueue>)[cacheView])
         && (exists || (!cacheSearch && !cacheTag))
       ) {
-        items = [mappedConversation, ...items].slice(0, Math.max(CONVERSATION_PAGE_SIZE, entry.items.length));
+        items = isInternalActivity && exists
+          ? entry.items.map((item) => item.id === mappedConversation.id ? mappedConversation : item)
+          : [mappedConversation, ...items].slice(0, Math.max(CONVERSATION_PAGE_SIZE, entry.items.length));
       }
       conversationCacheRef.current[cacheKey] = { ...entry, items };
-    }
-
-    if (!accessible && activeConversationIdRef.current === String(event.conversationId)) {
-      activeConversationIdRef.current = null;
-      setActiveConversationId(null);
-      setMessages([]);
-      setReplyTarget(null);
-      setIsSidebarOpen(false);
-      delete allMessagesRef.current[String(event.conversationId)];
-      delete messageCacheMetaRef.current[String(event.conversationId)];
     }
 
     if (!event.message) return;
@@ -2547,7 +2590,7 @@ function SalesChatPage() {
     if (activeConversationIdRef.current === conversationId) {
       setMessages(cachedMessages);
     }
-  }, [activeFilter, conversationSearch, isAdmin, loadMessages, selectedTagFilterId, storeMessageCache, user?.idUsuario]);
+  }, [activeFilter, conversationSearch, loadMessages, selectedTagFilterId, storeMessageCache, user?.idUsuario]);
 
   useEffect(() => {
     realtimeEventHandlerRef.current = applyRealtimeEvent;
@@ -2711,7 +2754,10 @@ function SalesChatPage() {
   const isUnassignedWaitingActive = isSharedUnassignedActive;
   const canOperateActiveConversation = Boolean(activeConversationId)
     && !isUnassignedWaitingActive
+    && activeConversation?.status !== "RESUELTO"
     && activeConversation?.attentionQueue !== "AGENT_ACTIVE";
+  const canManageActiveConversation = Boolean(activeConversationId)
+    && (isAdmin || activeConversation?.assignedUserId === user?.idUsuario);
   const filteredTransferUsers = transferUsers.filter((transferUser) => {
     if (transferUser.id === activeConversation?.assignedUserId) {
       return false;
@@ -4560,8 +4606,7 @@ function SalesChatPage() {
 
           <div className="mt-3">
             <div className="grid grid-cols-2 gap-1.5 rounded-2xl border border-border/70 bg-muted/35 p-1.5">
-              {isAdmin && (
-                <button
+              <button
                   type="button"
                   aria-pressed={activeFilter === "all"}
                   onClick={() => changeFilter("all")}
@@ -4580,8 +4625,7 @@ function SalesChatPage() {
                   )}>
                     {allConversationCount}
                   </span>
-                </button>
-              )}
+              </button>
 
               <button
                 type="button"
@@ -4789,7 +4833,7 @@ function SalesChatPage() {
             </div>
 
             <div className="flex w-full items-center justify-center gap-1.5 md:w-auto md:justify-start md:gap-2">
-              {!isUnassignedWaitingActive && !isAgentActive && <div className="relative flex rounded-full bg-muted text-foreground shadow-sm">
+              {canManageActiveConversation && !isUnassignedWaitingActive && !isAgentActive && <div className="relative flex rounded-full bg-muted text-foreground shadow-sm">
                 {resolvedIds.has(activeConversationId) ? (
                   <Button
                     onClick={() => void handleReopenCurrent()}
@@ -4850,7 +4894,7 @@ function SalesChatPage() {
                   </div>
                 )}
               </div>}
-              {activeConversation?.attentionQueue === "HUMAN_ACTIVE" && (
+              {canManageActiveConversation && activeConversation?.attentionQueue === "HUMAN_ACTIVE" && (
                 <Button
                   type="button"
                   onClick={() => void handleEnableAgentCurrent()}
@@ -4892,6 +4936,7 @@ function SalesChatPage() {
                 <button
                   type="button"
                   onClick={openQuickSaleSidebar}
+                  disabled={!canOperateActiveConversation}
                   className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
                     isSidebarOpen
                       ? "bg-muted text-foreground"
@@ -4907,8 +4952,9 @@ function SalesChatPage() {
 
           <button
               type="button"
-              onClick={openTagModal}
-              className="flex h-10 w-full items-center justify-between px-4 text-left text-sm text-muted-foreground hover:text-foreground transition-colors"
+              onClick={() => { if (canManageActiveConversation) openTagModal(); }}
+              disabled={!canManageActiveConversation}
+              className="flex h-10 w-full items-center justify-between px-4 text-left text-sm text-muted-foreground transition-colors enabled:hover:text-foreground disabled:cursor-default"
             >
               <span className="flex items-center gap-2">
                 Etiquetas
@@ -4926,7 +4972,7 @@ function SalesChatPage() {
                   </span>
                 )}
               </span>
-              <ChevronDownIcon className="h-4 w-4 text-muted-foreground" />
+              {canManageActiveConversation && <ChevronDownIcon className="h-4 w-4 text-muted-foreground" />}
             </button>
         </header>
 
@@ -4961,6 +5007,7 @@ function SalesChatPage() {
                           onRetry={retryMessage}
                           onReply={handleReplyToMessage}
                           onDelete={handleDeleteMessage}
+                          canDelete={canManageActiveConversation || item.sentByUserId === user?.idUsuario}
                           deleting={deletingMessageId === item.id}
                           onSendReceipt={sendSaleReceipt}
                         />

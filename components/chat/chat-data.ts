@@ -44,6 +44,8 @@ export type ChatMessage = {
   replyTo?: MessageQuote | null;
   deleted?: boolean;
   aiGenerated?: boolean;
+  sentByUserId?: number | null;
+  sentByName?: string | null;
   relatedSaleId?: number | null;
   sticker?: boolean;
   viewOnce?: boolean;

@@ -4,7 +4,7 @@ import { proxyWhatsappRequest } from "../../_proxy"
 
 type RouteContext = { params: Promise<{ segments: string[] }> }
 
-async function forward(request: NextRequest, context: RouteContext, method: "GET" | "POST") {
+async function forward(request: NextRequest, context: RouteContext, method: "GET" | "POST" | "DELETE") {
   const { segments } = await context.params
   const suffix = segments.map(encodeURIComponent).join("/")
   return proxyWhatsappRequest(
@@ -20,4 +20,8 @@ export function GET(request: NextRequest, context: RouteContext) {
 
 export function POST(request: NextRequest, context: RouteContext) {
   return forward(request, context, "POST")
+}
+
+export function DELETE(request: NextRequest, context: RouteContext) {
+  return forward(request, context, "DELETE")
 }

@@ -105,7 +105,26 @@ interface AgentMonitoring {
   pendingOutputs: number
   duplicateReceipts: number
   automaticSales: number
+  aiUsage24h: AiUsageWindow
+  aiUsage7d: AiUsageWindow
 }
+
+interface AiUsageWindow {
+  since: string | null
+  calls: number
+  totalTokens: number | null
+  tokensPerCompletedJob: number | null
+  decisions: number
+  responses: number
+  corrections: number
+  deterministicPercentage: number
+  failures: number
+  retries: number
+}
+
+const EMPTY_AI_USAGE: AiUsageWindow = { since: null, calls: 0, totalTokens: null,
+  tokensPerCompletedJob: null, decisions: 0, responses: 0, corrections: 0,
+  deterministicPercentage: 0, failures: 0, retries: 0 }
 
 interface ShalomAgencySyncStatus {
   running: boolean
@@ -155,7 +174,8 @@ Responde en español, de forma breve, clara y profesional, con pocos emojis.
 Acompaña a la clienta hacia la compra sin presionarla y evita respuestas frías, robóticas o repetitivas.`,
   monitoring: { available: false, since: null, health: "UNAVAILABLE", sessions: 0, completedJobs: 0,
     failedJobs: 0, suppressedResponses: 0, failedTools: 0, sentOutputs: 0, failedOutputs: 0,
-    pendingOutputs: 0, duplicateReceipts: 0, automaticSales: 0 },
+    pendingOutputs: 0, duplicateReceipts: 0, automaticSales: 0,
+    aiUsage24h: EMPTY_AI_USAGE, aiUsage7d: EMPTY_AI_USAGE },
 }
 
 type KnowledgeCategory = "POLITICAS" | "HORARIOS" | "UBICACION" | "ENVIOS" | "CUIDADOS" | "FAQ"
@@ -1049,6 +1069,21 @@ export default function ConexionesPage() {
               <Metric label="Jobs completados" value={monitoring.completedJobs} />
               <Metric label="Ventas automáticas" value={monitoring.automaticSales} />
             </div>
+            {([['Uso de IA · 24 horas', monitoring.aiUsage24h], ['Uso de IA · 7 días', monitoring.aiUsage7d]] as const).map(([label, usage]) => (
+              <div key={label} className="space-y-2 rounded-xl border border-border p-3">
+                <p className="text-xs font-semibold text-foreground">{label}</p>
+                <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                  <Metric label="Llamadas" value={usage?.calls ?? 0} />
+                  <Metric label="Tokens totales" value={usage?.totalTokens ?? 0} />
+                  <Metric label="Tokens por job" value={Math.round(usage?.tokensPerCompletedJob ?? 0)} />
+                  <Metric label="Determinísticas %" value={Math.round(usage?.deterministicPercentage ?? 0)} />
+                  <Metric label="Clasificaciones" value={usage?.decisions ?? 0} />
+                  <Metric label="Redacciones" value={usage?.responses ?? 0} />
+                  <Metric label="Correcciones" value={usage?.corrections ?? 0} danger={(usage?.corrections ?? 0) > 0} />
+                  <Metric label="Fallos / reintentos" value={(usage?.failures ?? 0) + (usage?.retries ?? 0)} danger={(usage?.failures ?? 0) > 0} />
+                </div>
+              </div>
+            ))}
           </div>
         </DialogContent>
       </Dialog>

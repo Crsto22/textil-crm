@@ -198,6 +198,32 @@
   background: rgba(148, 163, 184, 0.55);
 }
 
+.tag-filter-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(100, 116, 139, 0.4) transparent;
+}
+
+.tag-filter-scroll::-webkit-scrollbar {
+  height: 4px;
+}
+
+.tag-filter-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.tag-filter-scroll::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.35);
+  border-radius: 4px;
+}
+
+.dark .tag-filter-scroll {
+  scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
+}
+
+.dark .tag-filter-scroll::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.35);
+}
+
 /* Scroll horizontal con barra invisible */
 .scrollbar-hide {
   scrollbar-width: none;
@@ -226,4 +252,3 @@
 .dark .whatsapp-outgoing-meta {
   color: #ffffff99;
 }
-

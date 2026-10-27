@@ -7,6 +7,7 @@ import {
   ArrowLeftIcon,
   ArrowPathIcon,
   ChatBubbleLeftRightIcon,
+  CheckIcon,
   CheckCircleIcon,
   DocumentIcon,
   DocumentPlusIcon,
@@ -15,6 +16,7 @@ import {
   MagnifyingGlassIcon,
   PaperAirplaneIcon,
   PlusIcon,
+  TagIcon,
   TruckIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline"
@@ -27,8 +29,23 @@ import { conversationDayKey, formatConversationDayLabel, formatConversationListD
 import { WarehouseChatComposer } from "@/components/chat/WarehouseChatComposer"
 import { WarehouseMessageBubble, type WarehouseChatMessage } from "@/components/chat/WarehouseMessageBubble"
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { authFetch } from "@/lib/auth/auth-fetch"
 import { cn } from "@/lib/utils"
+import { toast } from "sonner"
+
+type ConversationTag = {
+  id: number
+  label: string
+  color: string
+}
+
+type TagResponse = {
+  id: number
+  nombre: string
+  color: string
+  uso: number
+}
 
 type ShippingConversation = {
   id: number
@@ -40,6 +57,7 @@ type ShippingConversation = {
   lastMessageType?: string | null
   lastMessageAt?: string | null
   unreadCount: number
+  tags: ConversationTag[]
 }
 
 type ConversationPage = {
@@ -76,6 +94,7 @@ type PendingAttachment = {
 const CONVERSATION_SIZE = 50
 const MESSAGE_SIZE = 10
 const MESSAGE_CACHE_LIMIT = 5
+const TAG_COLORS = ["#3b82f6", "#22c55e", "#ef4444", "#eab308", "#a855f7", "#f97316", "#ec4899", "#14b8a6", "#6366f1", "#78716c"]
 
 function contactName(conversation: ShippingConversation) {
   return conversation.contactName?.trim()
@@ -135,6 +154,13 @@ export function ShippingChatPanel() {
   const [activeAttachmentId, setActiveAttachmentId] = useState<string | null>(null)
   const [attachmentCaption, setAttachmentCaption] = useState("")
   const [connection, setConnection] = useState<ShippingConnection | null>(null)
+  const [availableTags, setAvailableTags] = useState<ConversationTag[]>([])
+  const [selectedTagFilterId, setSelectedTagFilterId] = useState<number | null>(null)
+  const [tagModalOpen, setTagModalOpen] = useState(false)
+  const [tagsLoading, setTagsLoading] = useState(false)
+  const [tagSaving, setTagSaving] = useState(false)
+  const [newTagLabel, setNewTagLabel] = useState("")
+  const [newTagColor, setNewTagColor] = useState(TAG_COLORS[0])
   const [mobileView, setMobileView] = useState<"list" | "conversation">("list")
   const selectedRef = useRef<ShippingConversation | null>(null)
   const dragDepthRef = useRef(0)
@@ -157,6 +183,7 @@ export function ShippingChatPanel() {
   const salesCacheRef = useRef<Record<number, { items: WarehouseChatMessage[]; oldestId: number | null; hasMoreBefore: boolean; available: boolean }>>({})
   const listAbortRef = useRef<AbortController | null>(null)
   const messageAbortRef = useRef<AbortController | null>(null)
+  const conversationListRef = useRef<HTMLDivElement | null>(null)
   const messageScrollRef = useRef<HTMLDivElement | null>(null)
   const refreshTimerRef = useRef<number | null>(null)
   const handledRequestedConversationRef = useRef<number | null>(null)
@@ -209,6 +236,18 @@ export function ShippingChatPanel() {
     }
   }, [])
 
+  const loadAvailableTags = useCallback(async () => {
+    setTagsLoading(true)
+    try {
+      const data = await api<TagResponse[]>("/api/crm/whatsapp/shipping/tags")
+      setAvailableTags(data.map((tag) => ({ id: tag.id, label: tag.nombre, color: tag.color })))
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudieron cargar las etiquetas")
+    } finally {
+      setTagsLoading(false)
+    }
+  }, [])
+
   const loadConversations = useCallback(async (mode: "reset" | "append" | "refresh" = "reset") => {
     const append = mode === "append"
     if (append && (loadingMoreRef.current || !hasMoreConversationsRef.current)) return
@@ -224,6 +263,7 @@ export function ShippingChatPanel() {
     try {
       const params = new URLSearchParams({ page: String(page), size: String(CONVERSATION_SIZE) })
       if (query) params.set("q", query)
+      if (selectedTagFilterId != null) params.set("tagId", String(selectedTagFilterId))
       const data = await api<ConversationPage>(`/api/crm/whatsapp/shipping/conversations?${params}`, {
         signal: controller.signal,
       })
@@ -231,7 +271,7 @@ export function ShippingChatPanel() {
       const current = conversationsRef.current
       const merged = append
         ? Array.from(new Map([...current, ...data.content].map((item) => [item.id, item])).values())
-        : mode === "refresh"
+        : mode === "refresh" && selectedTagFilterId == null
           ? Array.from(new Map([...data.content, ...current].map((item) => [item.id, item])).values())
               .slice(0, Math.max(CONVERSATION_SIZE, current.length))
           : data.content
@@ -255,7 +295,7 @@ export function ShippingChatPanel() {
         loadingMoreRef.current = false
       }
     }
-  }, [query])
+  }, [query, selectedTagFilterId])
 
   const loadMessages = useCallback(async (
     conversationId: number,
@@ -392,7 +432,32 @@ export function ShippingChatPanel() {
     return () => window.clearTimeout(timer)
   // loadConversations changes as paging state changes; a search should reset only when its value changes.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query])
+  }, [query, selectedTagFilterId])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void loadAvailableTags(), 0)
+    return () => window.clearTimeout(timer)
+  }, [loadAvailableTags])
+
+  useEffect(() => {
+    const list = conversationListRef.current
+    if (!list) return
+
+    const loadUntilScrollable = () => {
+      const doesNotFillViewport = list.scrollHeight <= list.clientHeight + 1
+      if (doesNotFillViewport && hasMoreConversationsRef.current && !loadingMoreRef.current) {
+        void loadConversations("append")
+      }
+    }
+
+    const timer = window.setTimeout(loadUntilScrollable, 0)
+    const observer = new ResizeObserver(loadUntilScrollable)
+    observer.observe(list)
+    return () => {
+      window.clearTimeout(timer)
+      observer.disconnect()
+    }
+  }, [conversations.length, loadConversations])
 
   useEffect(() => {
     const timer = window.setTimeout(() => void loadConnection(), 0)
@@ -670,6 +735,88 @@ export function ShippingChatPanel() {
     }
   }
 
+  function setConversationTags(conversationId: number, tags: ConversationTag[]) {
+    setConversations((current) => {
+      const updated = current.map((conversation) => conversation.id === conversationId ? { ...conversation, tags } : conversation)
+      conversationsRef.current = updated
+      return updated
+    })
+    setSelected((current) => current?.id === conversationId ? { ...current, tags } : current)
+  }
+
+  async function assignTag(tagId: number) {
+    if (!selected || tagSaving) return
+    setTagSaving(true)
+    try {
+      const tags = await api<ConversationTag[]>(
+        `/api/crm/whatsapp/shipping/conversations/${selected.id}/tags/${tagId}`,
+        { method: "POST" },
+      )
+      setConversationTags(selected.id, tags)
+      toast.success("Etiqueta asignada")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo asignar la etiqueta")
+    } finally {
+      setTagSaving(false)
+    }
+  }
+
+  async function createAndAssignTag() {
+    if (!selected || !newTagLabel.trim() || tagSaving) return
+    const label = newTagLabel.trim()
+    const existing = availableTags.find((tag) => tag.label.toLowerCase() === label.toLowerCase())
+    setTagSaving(true)
+    try {
+      let tagId = existing?.id
+      if (tagId == null) {
+        const created = await api<TagResponse>("/api/crm/whatsapp/shipping/tags", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ nombre: label, color: newTagColor }),
+        })
+        tagId = created.id
+        setAvailableTags((current) => [...current, { id: created.id, label: created.nombre, color: created.color }]
+          .sort((left, right) => left.label.localeCompare(right.label)))
+      }
+      const tags = await api<ConversationTag[]>(
+        `/api/crm/whatsapp/shipping/conversations/${selected.id}/tags/${tagId}`,
+        { method: "POST" },
+      )
+      setConversationTags(selected.id, tags)
+      setNewTagLabel("")
+      setNewTagColor(TAG_COLORS[0])
+      toast.success(existing ? "Etiqueta asignada" : "Etiqueta creada y asignada")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo crear la etiqueta")
+    } finally {
+      setTagSaving(false)
+    }
+  }
+
+  async function removeTag(tagId: number) {
+    if (!selected || tagSaving) return
+    setTagSaving(true)
+    try {
+      const tags = await api<ConversationTag[]>(
+        `/api/crm/whatsapp/shipping/conversations/${selected.id}/tags/${tagId}`,
+        { method: "DELETE" },
+      )
+      setConversationTags(selected.id, tags)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo quitar la etiqueta")
+    } finally {
+      setTagSaving(false)
+    }
+  }
+
+  function openTagModal() {
+    if (!selected) return
+    setNewTagLabel("")
+    setNewTagColor(TAG_COLORS[0])
+    setTagModalOpen(true)
+    void loadAvailableTags()
+  }
+
   const blocked = connection == null || connection.status !== "CONNECTED"
     || Boolean(connection.phoneChanged || connection.operationsBlocked)
   const activeAttachment = pendingAttachments.find((item) => item.id === activeAttachmentId) ?? pendingAttachments[0]
@@ -730,9 +877,47 @@ export function ShippingChatPanel() {
               <ArrowPathIcon className={cn("h-4 w-4", loadingConversations && "animate-spin")} />
             </Button>
           </div>
+          <div className="tag-filter-scroll mt-3 flex w-full items-center gap-2 overflow-x-auto pb-2" aria-label="Filtros por etiqueta">
+            <button
+              type="button"
+              onClick={() => setSelectedTagFilterId(null)}
+              aria-pressed={selectedTagFilterId == null}
+              className={cn(
+                "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[11px] font-semibold transition-colors",
+                selectedTagFilterId == null
+                  ? "border-emerald-500 bg-emerald-500 text-white"
+                  : "border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
+              )}
+            >
+              <TagIcon className="h-3.5 w-3.5" /> Todas
+            </button>
+            {tagsLoading ? (
+              <span className="shrink-0 text-xs text-muted-foreground">Cargando etiquetas...</span>
+            ) : availableTags.length === 0 ? (
+              <span className="shrink-0 text-xs text-muted-foreground">Sin etiquetas</span>
+            ) : availableTags.map((tag) => (
+              <button
+                key={tag.id}
+                type="button"
+                onClick={() => setSelectedTagFilterId(tag.id)}
+                aria-pressed={selectedTagFilterId === tag.id}
+                className={cn(
+                  "inline-flex h-7 max-w-40 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[11px] font-semibold transition-colors",
+                  selectedTagFilterId === tag.id
+                    ? "border-transparent text-white shadow-sm"
+                    : "border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
+                )}
+                style={selectedTagFilterId === tag.id ? { backgroundColor: tag.color } : undefined}
+                title={tag.label}
+              >
+                <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: selectedTagFilterId === tag.id ? "currentColor" : tag.color }} />
+                <span className="truncate">{tag.label}</span>
+              </button>
+            ))}
+          </div>
         </div>
 
-        <div className="sidebar-scroll min-h-0 flex-1 overflow-y-auto" onScroll={onConversationScroll}>
+        <div ref={conversationListRef} className="sidebar-scroll min-h-0 flex-1 overflow-y-auto" onScroll={onConversationScroll}>
           {loadingConversations && conversations.length === 0 ? <ChatConversationSkeletons label="Cargando chats de Envíos" /> : listError && conversations.length === 0 ? (
             <div className="px-6 py-12 text-center">
               <p className="text-sm font-semibold">No se pudieron cargar los chats</p>
@@ -774,6 +959,14 @@ export function ShippingChatPanel() {
                     </span>
                   )}
                 </div>
+                {conversation.tags?.length > 0 && (
+                  <div className="mt-1.5 flex min-w-0 gap-1 overflow-hidden">
+                    {conversation.tags.slice(0, 3).map((tag) => (
+                      <span key={tag.id} className="max-w-24 truncate rounded-full px-2 py-0.5 text-[9px] font-semibold text-white" style={{ backgroundColor: tag.color }}>{tag.label}</span>
+                    ))}
+                    {conversation.tags.length > 3 && <span className="text-[9px] font-semibold text-muted-foreground">+{conversation.tags.length - 3}</span>}
+                  </div>
+                )}
               </div>
             </button>
           ))}
@@ -804,7 +997,15 @@ export function ShippingChatPanel() {
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-bold sm:text-base">{contactName(selected)}</p>
                 <p className="truncate text-xs text-muted-foreground">{contactPhone(selected)}</p>
+                {selected.tags?.length > 0 && (
+                  <div className="mt-1 flex max-w-full gap-1 overflow-hidden">
+                    {selected.tags.map((tag) => <span key={tag.id} className="max-w-28 truncate rounded-full px-2 py-0.5 text-[9px] font-semibold text-white" style={{ backgroundColor: tag.color }}>{tag.label}</span>)}
+                  </div>
+                )}
               </div>
+              <Button type="button" variant="ghost" size="icon-sm" onClick={openTagModal} className="h-9 w-9 shrink-0 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Administrar etiquetas" title="Etiquetas de Envíos">
+                <TagIcon className="h-5 w-5" />
+              </Button>
               <div className="hidden items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-200 sm:flex">
                 <TruckIcon className="h-4 w-4" /> Envíos
               </div>
@@ -933,6 +1134,53 @@ export function ShippingChatPanel() {
         )}
       </div>
       </div>
+      <Dialog open={tagModalOpen} onOpenChange={setTagModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Etiquetas de Envíos</DialogTitle>
+            <DialogDescription>Clasifica esta conversación sin modificar las etiquetas del chat de Ventas.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-5">
+            <div>
+              <label className="mb-1.5 block text-sm font-medium">Nombre de la etiqueta</label>
+              <input value={newTagLabel} onChange={(event) => setNewTagLabel(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void createAndAssignTag() }} maxLength={80} placeholder="Ej: Urgente, Seguimiento..." className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-500/20" />
+            </div>
+            <div>
+              <p className="mb-2 text-sm font-medium">Color</p>
+              <div className="flex flex-wrap gap-2">
+                {TAG_COLORS.map((color) => <button key={color} type="button" onClick={() => setNewTagColor(color)} className={cn("h-8 w-8 rounded-lg transition-transform", newTagColor === color ? "scale-110 ring-2 ring-foreground ring-offset-2" : "hover:scale-105")} style={{ backgroundColor: color }} aria-label={`Usar color ${color}`}>{newTagColor === color && <CheckIcon className="mx-auto h-4 w-4 text-white" />}</button>)}
+              </div>
+            </div>
+            <Button type="button" onClick={() => void createAndAssignTag()} disabled={tagSaving || newTagLabel.trim().length < 2} className="w-full">
+              {tagSaving ? "Guardando..." : "Crear y asignar"}
+            </Button>
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Etiquetas disponibles</p>
+              {tagsLoading ? <p className="text-sm text-muted-foreground">Cargando etiquetas...</p> : (
+                <div className="flex flex-wrap gap-2">
+                  {availableTags.filter((tag) => !selected?.tags?.some((activeTag) => activeTag.id === tag.id)).map((tag) => (
+                    <button key={tag.id} type="button" onClick={() => void assignTag(tag.id)} disabled={tagSaving} className="rounded-full px-3 py-1 text-xs font-semibold text-white disabled:opacity-50" style={{ backgroundColor: tag.color }}>{tag.label}</button>
+                  ))}
+                  {!availableTags.some((tag) => !selected?.tags?.some((activeTag) => activeTag.id === tag.id)) && <span className="text-xs text-muted-foreground">No hay etiquetas pendientes de asignar.</span>}
+                </div>
+              )}
+            </div>
+            {selected?.tags?.length ? (
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Etiquetas actuales</p>
+                <div className="flex flex-wrap gap-2">
+                  {selected.tags.map((tag) => (
+                    <span key={tag.id} className="inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold text-white" style={{ backgroundColor: tag.color }}>
+                      {tag.label}
+                      <button type="button" onClick={() => void removeTag(tag.id)} disabled={tagSaving} className="rounded-full p-0.5 hover:bg-black/15 disabled:opacity-50" aria-label={`Quitar ${tag.label}`}><XMarkIcon className="h-3 w-3" /></button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
       {activeAttachment ? (
         <div className="fixed inset-0 z-[90] flex flex-col bg-[#0b141a] text-white" role="dialog" aria-modal="true" aria-label="Archivos para enviar">
           <input ref={previewFileInputRef} type="file" multiple accept="image/*,video/*,audio/*,application/pdf,.doc,.docx,.xls,.xlsx,.txt" className="hidden" onChange={(event) => { addPendingFiles(Array.from(event.target.files || [])); event.target.value = "" }} />

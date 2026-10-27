@@ -38,6 +38,7 @@ import {
   MagnifyingGlassIcon,
   MicrophoneIcon,
   DocumentIcon,
+  EnvelopeIcon,
   UserPlusIcon,
   FaceSmileIcon,
   CheckIcon,
@@ -1884,6 +1885,7 @@ function SalesChatPage() {
   const [isMessagesLoading, setIsMessagesLoading] = useState(false);
   const [isOlderMessagesLoading, setIsOlderMessagesLoading] = useState(false);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [activeConversationSnapshot, setActiveConversationSnapshot] = useState<CrmConversation | null>(null);
   const setChatError = (...messages: string[]) => {
     void messages;
   };
@@ -1899,6 +1901,7 @@ function SalesChatPage() {
   const allMessagesRef = useRef<Record<string, ChatMessage[]>>({});
   const sentAttachmentUrlsRef = useRef<string[]>([]);
   const [activeFilter, setActiveFilter] = useState<ConversationFilter>("all");
+  const [unreadOnly, setUnreadOnly] = useState(false);
   const [conversationSearchInput, setConversationSearchInput] = useState("");
   const [conversationSearch, setConversationSearch] = useState("");
   const [selectedTagFilterId, setSelectedTagFilterId] = useState<string | null>(null);
@@ -1964,7 +1967,7 @@ function SalesChatPage() {
       : activeFilter === "mine" ? "MINE"
       : activeFilter === "waiting" ? "WAITING"
         : activeFilter === "resolved" ? "RESOLVED" : "ALL";
-    const cacheKey = `${view}|${conversationSearch}|${selectedTagFilterId ?? ""}`;
+    const cacheKey = `${view}|${conversationSearch}|${selectedTagFilterId ?? ""}|${unreadOnly ? "unread" : "all"}`;
     const cached = conversationCacheRef.current[cacheKey];
     const cachedQueueCount = cached
       ? view === "WAITING" ? cached.counts.waiting
@@ -1992,6 +1995,7 @@ function SalesChatPage() {
     });
     if (conversationSearch) params.set("q", conversationSearch);
     if (selectedTagFilterId) params.set("tagId", selectedTagFilterId);
+    if (unreadOnly) params.set("unreadOnly", "true");
 
     if (append) {
       setIsLoadingMoreConversations(true);
@@ -2044,7 +2048,7 @@ function SalesChatPage() {
         setIsLoadingMoreConversations(false);
       }
     }
-  }, [activeFilter, conversationSearch, selectedTagFilterId]);
+  }, [activeFilter, conversationSearch, selectedTagFilterId, unreadOnly]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -2072,16 +2076,17 @@ function SalesChatPage() {
     const params = new URLSearchParams({ view, page: "0", size: "1" });
     if (conversationSearch) params.set("q", conversationSearch);
     if (selectedTagFilterId) params.set("tagId", selectedTagFilterId);
+    if (unreadOnly) params.set("unreadOnly", "true");
     const response = await authFetch(`/api/crm/whatsapp/conversations?${params.toString()}`, {
       cache: "no-store",
     });
     if (!response.ok) return;
     const data = (await response.json()) as ConversationPageResponse;
     setConversationCounts(data.counts);
-    const cacheKey = `${view}|${conversationSearch}|${selectedTagFilterId ?? ""}`;
+    const cacheKey = `${view}|${conversationSearch}|${selectedTagFilterId ?? ""}|${unreadOnly ? "unread" : "all"}`;
     const cached = conversationCacheRef.current[cacheKey];
     if (cached) conversationCacheRef.current[cacheKey] = { ...cached, counts: data.counts };
-  }, [activeFilter, conversationSearch, selectedTagFilterId]);
+  }, [activeFilter, conversationSearch, selectedTagFilterId, unreadOnly]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -2209,6 +2214,9 @@ function SalesChatPage() {
     }
     setIsActionMenuOpen(false);
     setReplyTarget(null);
+    setActiveConversationSnapshot(
+      conversationsRef.current.find((conversation) => conversation.id === conversationId) ?? null,
+    );
     setActiveConversationId(conversationId);
     activeConversationIdRef.current = conversationId;
     setChatError("");
@@ -2479,6 +2487,19 @@ function SalesChatPage() {
     }
   };
 
+  const toggleUnreadOnly = () => {
+    const nextUnreadOnly = !unreadOnly;
+    setUnreadOnly(nextUnreadOnly);
+    if (!nextUnreadOnly || !activeConversationId) return;
+    const activeConversation = conversations.find((conversation) => conversation.id === activeConversationId)
+      ?? (activeConversationSnapshot?.id === activeConversationId ? activeConversationSnapshot : null);
+    if ((activeConversation?.unreadCount ?? 0) > 0) return;
+    allMessagesRef.current = { ...allMessagesRef.current, [activeConversationId]: messages };
+    setActiveConversationId(null);
+    setMessages([]);
+    setReplyTarget(null);
+  };
+
   useEffect(() => {
     conversationsRef.current = conversations;
   }, [conversations]);
@@ -2513,6 +2534,9 @@ function SalesChatPage() {
     if (event.conversation.area !== "SALES") return;
     window.dispatchEvent(new CustomEvent("crm-agent-event", { detail: event }));
     const mappedConversation = mapConversation(event.conversation);
+    if (activeConversationIdRef.current === mappedConversation.id) {
+      setActiveConversationSnapshot(mappedConversation);
+    }
     const isInternalActivity = event.message?.origin === "CRM_ACTIVITY";
     if (!isInternalActivity) {
       refreshConversationCountsRef.current();
@@ -2521,7 +2545,7 @@ function SalesChatPage() {
       : activeFilter === "mine" ? "HUMAN_ACTIVE"
       : activeFilter === "waiting" ? "ADVISOR_REQUIRED"
         : activeFilter === "resolved" ? "RESOLVED" : "HUMAN_ACTIVE";
-    const matchesActiveList = activeFilter === "all"
+    const matchesCategory = activeFilter === "all"
       ? true
       : activeFilter === "agent"
         ? mappedConversation.attentionQueue === "AGENT_ACTIVE"
@@ -2532,6 +2556,7 @@ function SalesChatPage() {
           && mappedConversation.status !== "RESUELTO"
           && mappedConversation.attentionQueue !== "AGENT_ACTIVE"
         : mappedConversation.attentionQueue === expectedQueue;
+    const matchesActiveList = matchesCategory && (!unreadOnly || (mappedConversation.unreadCount ?? 0) > 0);
 
     setConversations((current) => {
       const exists = current.some((item) => item.id === mappedConversation.id);
@@ -2546,11 +2571,13 @@ function SalesChatPage() {
     });
 
     for (const [cacheKey, entry] of Object.entries(conversationCacheRef.current)) {
-      const [cacheView, cacheSearch, cacheTag] = cacheKey.split("|");
+      const [cacheView, cacheSearch, cacheTag, cacheUnread] = cacheKey.split("|");
       const exists = entry.items.some((item) => item.id === mappedConversation.id);
       let items = entry.items.filter((item) => item.id !== mappedConversation.id);
+      const matchesCacheUnread = cacheUnread !== "unread" || (mappedConversation.unreadCount ?? 0) > 0;
       if (
         event.type !== "conversation.removed"
+        && matchesCacheUnread
         && (cacheView === "ALL"
           ? true
           : cacheView === "MINE"
@@ -2590,7 +2617,7 @@ function SalesChatPage() {
     if (activeConversationIdRef.current === conversationId) {
       setMessages(cachedMessages);
     }
-  }, [activeFilter, conversationSearch, loadMessages, selectedTagFilterId, storeMessageCache, user?.idUsuario]);
+  }, [activeFilter, conversationSearch, loadMessages, selectedTagFilterId, storeMessageCache, unreadOnly, user?.idUsuario]);
 
   useEffect(() => {
     realtimeEventHandlerRef.current = applyRealtimeEvent;
@@ -2738,7 +2765,8 @@ function SalesChatPage() {
   const [newTagColor, setNewTagColor] = useState(TAG_COLORS[0].value);
   const selectedTagFilter = availableTags.find((tag) => tag.id === selectedTagFilterId) ?? null;
 
-  const activeConversation = conversations.find((conversation) => conversation.id === activeConversationId) ?? null;
+  const activeConversation = conversations.find((conversation) => conversation.id === activeConversationId)
+    ?? (activeConversationSnapshot?.id === activeConversationId ? activeConversationSnapshot : null);
   const activeConversationTags = activeConversation?.tags ?? [];
   const allConversationCount = conversationCounts.all;
   const agentConversationCount = conversationCounts.agent;
@@ -4605,13 +4633,13 @@ function SalesChatPage() {
           )}
 
           <div className="mt-3">
-            <div className="grid grid-cols-2 gap-1.5 rounded-2xl border border-border/70 bg-muted/35 p-1.5">
+            <div className="tag-filter-scroll flex w-full items-center gap-1.5 overflow-x-auto rounded-2xl border border-border/70 bg-muted/35 p-1.5 pb-2.5">
               <button
                   type="button"
                   aria-pressed={activeFilter === "all"}
                   onClick={() => changeFilter("all")}
                   className={cn(
-                    "group inline-flex min-h-9 items-center gap-2 rounded-xl border px-2.5 text-left text-xs font-semibold transition-all",
+                    "group inline-flex min-h-9 w-[126px] shrink-0 items-center gap-2 rounded-xl border px-2.5 text-left text-xs font-semibold transition-all",
                     activeFilter === "all"
                       ? "border-border bg-background text-foreground shadow-sm"
                       : "border-transparent text-muted-foreground hover:bg-background/70 hover:text-foreground",
@@ -4632,7 +4660,7 @@ function SalesChatPage() {
                 aria-pressed={activeFilter === "agent"}
                 onClick={() => changeFilter("agent")}
                 className={cn(
-                  "group inline-flex min-h-9 items-center gap-2 rounded-xl border px-2.5 text-left text-xs font-semibold transition-all",
+                  "group inline-flex min-h-9 w-[126px] shrink-0 items-center gap-2 rounded-xl border px-2.5 text-left text-xs font-semibold transition-all",
                   activeFilter === "agent"
                     ? "border-sky-200 bg-sky-50 text-sky-800 shadow-sm dark:border-sky-800 dark:bg-sky-950/70 dark:text-sky-200"
                     : "border-transparent text-muted-foreground hover:bg-background/70 hover:text-foreground",
@@ -4653,7 +4681,7 @@ function SalesChatPage() {
                 aria-pressed={activeFilter === "mine"}
                 onClick={() => changeFilter("mine")}
                 className={cn(
-                  "group inline-flex min-h-9 items-center gap-2 rounded-xl border px-2.5 text-left text-xs font-semibold transition-all",
+                  "group inline-flex min-h-9 w-[126px] shrink-0 items-center gap-2 rounded-xl border px-2.5 text-left text-xs font-semibold transition-all",
                   activeFilter === "mine"
                     ? "border-violet-200 bg-violet-50 text-violet-800 shadow-sm dark:border-violet-800 dark:bg-violet-950/70 dark:text-violet-200"
                     : "border-transparent text-muted-foreground hover:bg-background/70 hover:text-foreground",
@@ -4674,7 +4702,7 @@ function SalesChatPage() {
                 aria-pressed={activeFilter === "waiting"}
                 onClick={() => changeFilter("waiting")}
                 className={cn(
-                  "group inline-flex min-h-9 items-center gap-2 rounded-xl border px-2.5 text-left text-xs font-semibold transition-all",
+                  "group inline-flex min-h-9 w-[126px] shrink-0 items-center gap-2 rounded-xl border px-2.5 text-left text-xs font-semibold transition-all",
                   activeFilter === "waiting"
                     ? "border-amber-200 bg-amber-50 text-amber-800 shadow-sm dark:border-amber-800 dark:bg-amber-950/70 dark:text-amber-200"
                     : "border-transparent text-muted-foreground hover:bg-background/70 hover:text-foreground",
@@ -4695,7 +4723,7 @@ function SalesChatPage() {
                 aria-pressed={activeFilter === "resolved"}
                 onClick={() => changeFilter("resolved")}
                 className={cn(
-                  "group inline-flex min-h-9 items-center gap-2 rounded-xl border px-2.5 text-left text-xs font-semibold transition-all",
+                  "group inline-flex min-h-9 w-[126px] shrink-0 items-center gap-2 rounded-xl border px-2.5 text-left text-xs font-semibold transition-all",
                   activeFilter === "resolved"
                     ? "border-emerald-200 bg-emerald-50 text-emerald-800 shadow-sm dark:border-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-200"
                     : "border-transparent text-muted-foreground hover:bg-background/70 hover:text-foreground",
@@ -4709,6 +4737,23 @@ function SalesChatPage() {
                 )}>
                   {conversationCounts.resolved}
                 </span>
+              </button>
+            </div>
+
+            <div className="mt-2 flex items-center">
+              <button
+                type="button"
+                aria-pressed={unreadOnly}
+                onClick={toggleUnreadOnly}
+                className={cn(
+                  "inline-flex h-8 items-center gap-2 rounded-full border px-3 text-[11px] font-semibold transition-colors",
+                  unreadOnly
+                    ? "border-blue-500 bg-blue-500 text-white shadow-sm"
+                    : "border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
+                )}
+              >
+                <EnvelopeIcon className="h-4 w-4" />
+                No leídos
               </button>
             </div>
 
@@ -4745,10 +4790,12 @@ function SalesChatPage() {
             <div className="px-6 py-12 text-center">
               <ChatBubbleLeftRightIcon className="mx-auto h-10 w-10 text-muted-foreground/30" />
               <p className="mt-3 text-sm font-semibold text-muted-foreground">
-                {conversationSearch || selectedTagFilterId ? "Sin resultados" : "Sin chats"}
+                {conversationSearch || selectedTagFilterId || unreadOnly ? "Sin resultados" : "Sin chats"}
               </p>
               <p className="mt-1 text-xs text-muted-foreground/70">
-                {conversationSearch || selectedTagFilterId
+                {unreadOnly
+                  ? "No hay chats no leídos en este filtro."
+                  : conversationSearch || selectedTagFilterId
                   ? "Prueba con otro nombre, numero o etiqueta."
                   : "Los mensajes nuevos de WhatsApp apareceran aqui."}
               </p>

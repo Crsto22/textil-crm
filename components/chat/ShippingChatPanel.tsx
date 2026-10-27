@@ -9,6 +9,7 @@ import {
   ChatBubbleLeftRightIcon,
   CheckIcon,
   CheckCircleIcon,
+  ChevronDownIcon,
   DocumentIcon,
   DocumentPlusIcon,
   DocumentTextIcon,
@@ -102,6 +103,13 @@ function contactName(conversation: ShippingConversation) {
     || conversation.phoneNumber?.trim()
     || conversation.whatsappUsername?.trim()
     || "Cliente"
+}
+
+function contactInitials(conversation: ShippingConversation) {
+  const source = contactName(conversation).trim()
+  const words = source.split(/\s+/).filter(Boolean)
+  if (words.length >= 2) return `${words[0][0]}${words[1][0]}`.toUpperCase()
+  return source.slice(0, 2).toUpperCase()
 }
 
 function contactPhone(conversation: ShippingConversation) {
@@ -1020,6 +1028,12 @@ export function ShippingChatPanel() {
                     {conversation.tags.length > 3 && <span className="text-[9px] font-semibold text-muted-foreground">+{conversation.tags.length - 3}</span>}
                   </div>
                 )}
+                <div className="mt-2 flex items-center justify-end gap-2 text-muted-foreground">
+                  <ChevronDownIcon className="h-3.5 w-3.5" />
+                  <span className="rounded bg-muted-foreground/35 px-1.5 py-0.5 text-[10px] font-semibold text-background">
+                    {contactInitials(conversation)}
+                  </span>
+                </div>
               </div>
             </button>
           ))}

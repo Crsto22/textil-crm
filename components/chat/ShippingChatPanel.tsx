@@ -92,7 +92,7 @@ type PendingAttachment = {
   url: string
 }
 
-const CONVERSATION_SIZE = 50
+const CONVERSATION_SIZE = 10
 const MESSAGE_SIZE = 10
 const MESSAGE_CACHE_LIMIT = 5
 const TAG_COLORS = ["#3b82f6", "#22c55e", "#ef4444", "#eab308", "#a855f7", "#f97316", "#ec4899", "#14b8a6", "#6366f1", "#78716c"]

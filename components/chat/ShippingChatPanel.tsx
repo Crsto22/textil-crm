@@ -13,6 +13,7 @@ import {
   DocumentIcon,
   DocumentPlusIcon,
   DocumentTextIcon,
+  EnvelopeIcon,
   ExclamationTriangleIcon,
   MagnifyingGlassIcon,
   PaperAirplaneIcon,
@@ -32,6 +33,12 @@ import { WarehouseMessageBubble, type WarehouseChatMessage } from "@/components/
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { authFetch } from "@/lib/auth/auth-fetch"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -165,6 +172,8 @@ export function ShippingChatPanel() {
   const [connection, setConnection] = useState<ShippingConnection | null>(null)
   const [availableTags, setAvailableTags] = useState<ConversationTag[]>([])
   const [selectedTagFilterId, setSelectedTagFilterId] = useState<number | null>(null)
+  const [unreadOnly, setUnreadOnly] = useState(false)
+  const [readStatePendingIds, setReadStatePendingIds] = useState<Set<number>>(() => new Set())
   const [tagModalOpen, setTagModalOpen] = useState(false)
   const [tagsLoading, setTagsLoading] = useState(false)
   const [tagSaving, setTagSaving] = useState(false)
@@ -197,6 +206,7 @@ export function ShippingChatPanel() {
   const messageScrollRef = useRef<HTMLDivElement | null>(null)
   const refreshTimerRef = useRef<number | null>(null)
   const handledRequestedConversationRef = useRef<number | null>(null)
+  const readStatePendingRef = useRef<Set<number>>(new Set())
 
   useEffect(() => { selectedRef.current = selected }, [selected])
   useEffect(() => { chatTabRef.current = chatTab }, [chatTab])
@@ -274,6 +284,7 @@ export function ShippingChatPanel() {
       const params = new URLSearchParams({ page: String(page), size: String(CONVERSATION_SIZE) })
       if (query) params.set("q", query)
       if (selectedTagFilterId != null) params.set("tagId", String(selectedTagFilterId))
+      if (unreadOnly) params.set("unreadOnly", "true")
       const data = await api<ConversationPage>(`/api/crm/whatsapp/shipping/conversations?${params}`, {
         signal: controller.signal,
       })
@@ -281,7 +292,7 @@ export function ShippingChatPanel() {
       const current = conversationsRef.current
       const merged = append
         ? Array.from(new Map([...current, ...data.content].map((item) => [item.id, item])).values())
-        : mode === "refresh" && selectedTagFilterId == null
+        : mode === "refresh" && selectedTagFilterId == null && !unreadOnly && !query
           ? Array.from(new Map([...data.content, ...current].map((item) => [item.id, item])).values())
               .slice(0, Math.max(CONVERSATION_SIZE, current.length))
           : data.content
@@ -305,7 +316,7 @@ export function ShippingChatPanel() {
         loadingMoreRef.current = false
       }
     }
-  }, [query, selectedTagFilterId])
+  }, [query, selectedTagFilterId, unreadOnly])
 
   const loadMessages = useCallback(async (
     conversationId: number,
@@ -442,7 +453,7 @@ export function ShippingChatPanel() {
     return () => window.clearTimeout(timer)
   // loadConversations changes as paging state changes; a search should reset only when its value changes.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, selectedTagFilterId])
+  }, [query, selectedTagFilterId, unreadOnly])
 
   useEffect(() => {
     const timer = window.setTimeout(() => void loadAvailableTags(), 0)
@@ -512,6 +523,79 @@ export function ShippingChatPanel() {
     }
   }, [loadConnection, loadConversations, loadMessages])
 
+  async function updateReadState(conversation: ShippingConversation, unread: boolean) {
+    const previousUnreadCount = conversation.unreadCount ?? 0
+    if ((!unread && previousUnreadCount === 0) || (unread && previousUnreadCount > 0)) return
+    if (readStatePendingRef.current.has(conversation.id)) return
+
+    const optimistic = {
+      ...conversation,
+      unreadCount: unread ? Math.max(1, previousUnreadCount) : 0,
+    }
+    const wasInList = conversationsRef.current.some((item) => item.id === conversation.id)
+    readStatePendingRef.current.add(conversation.id)
+    setReadStatePendingIds((current) => new Set(current).add(conversation.id))
+    setSelected((current) => current?.id === conversation.id ? optimistic : current)
+    setConversations((current) => {
+      let next = current.map((item) => item.id === conversation.id ? optimistic : item)
+      if (!unread && unreadOnly) next = next.filter((item) => item.id !== conversation.id)
+      conversationsRef.current = next
+      return next
+    })
+
+    try {
+      const updated = await api<ShippingConversation>(
+        `/api/crm/whatsapp/shipping/conversations/${conversation.id}/read-state`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ unread }),
+        },
+      )
+      setSelected((current) => current?.id === updated.id ? updated : current)
+      setConversations((current) => {
+        let next = current.map((item) => item.id === updated.id ? updated : item)
+        if (unreadOnly && updated.unreadCount === 0) {
+          next = next.filter((item) => item.id !== updated.id)
+        }
+        conversationsRef.current = next
+        return next
+      })
+    } catch (error) {
+      setSelected((current) => current?.id === conversation.id ? conversation : current)
+      setConversations((current) => {
+        let next = current.map((item) => item.id === conversation.id ? conversation : item)
+        if (wasInList && !next.some((item) => item.id === conversation.id)) {
+          next = [conversation, ...next]
+        }
+        conversationsRef.current = next
+        return next
+      })
+      toast.error(error instanceof Error ? error.message : "No se pudo actualizar el estado de lectura")
+    } finally {
+      readStatePendingRef.current.delete(conversation.id)
+      setReadStatePendingIds((current) => {
+        const next = new Set(current)
+        next.delete(conversation.id)
+        return next
+      })
+    }
+  }
+
+  function toggleUnreadOnly() {
+    const nextUnreadOnly = !unreadOnly
+    setUnreadOnly(nextUnreadOnly)
+    if (!nextUnreadOnly || !selected || selected.unreadCount > 0) return
+    messageAbortRef.current?.abort()
+    salesAbortRef.current?.abort()
+    selectedRef.current = null
+    setSelected(null)
+    setMessages([])
+    setSalesMessages([])
+    setDraft("")
+    setMobileView("list")
+  }
+
   async function selectConversation(conversation: ShippingConversation) {
     messageAbortRef.current?.abort()
     salesAbortRef.current?.abort()
@@ -535,10 +619,9 @@ export function ShippingChatPanel() {
     setHasMoreMessages(cached?.hasMoreBefore ?? false)
     setDraft("")
     setMobileView("conversation")
+    void updateReadState(conversation, false)
     if (cached?.newestId != null) await loadMessages(conversation.id, { afterId: cached.newestId, preserve: true })
     else await loadMessages(conversation.id)
-    setConversations((current) => current.map((item) => item.id === conversation.id
-      ? { ...item, unreadCount: 0 } : item))
   }
 
   useEffect(() => {
@@ -976,6 +1059,22 @@ export function ShippingChatPanel() {
               </button>
             ))}
           </div>
+          <div className="mt-2 flex items-center">
+            <button
+              type="button"
+              aria-pressed={unreadOnly}
+              onClick={toggleUnreadOnly}
+              className={cn(
+                "inline-flex h-8 items-center gap-2 rounded-full border px-3 text-[11px] font-semibold transition-colors",
+                unreadOnly
+                  ? "border-blue-500 bg-blue-500 text-white shadow-sm"
+                  : "border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
+              )}
+            >
+              <EnvelopeIcon className="h-4 w-4" />
+              No leídos
+            </button>
+          </div>
         </div>
 
         <div ref={conversationListRef} className="sidebar-scroll min-h-0 flex-1 overflow-y-auto" onScroll={onConversationScroll}>
@@ -988,16 +1087,28 @@ export function ShippingChatPanel() {
           ) : conversations.length === 0 ? (
             <div className="px-6 py-12 text-center">
               <ChatBubbleLeftRightIcon className="mx-auto h-10 w-10 text-muted-foreground/30" />
-              <p className="mt-3 text-sm font-semibold text-muted-foreground">{query ? "Sin resultados" : "Sin chats"}</p>
+              <p className="mt-3 text-sm font-semibold text-muted-foreground">{query || selectedTagFilterId != null || unreadOnly ? "Sin resultados" : "Sin chats"}</p>
               <p className="mt-1 text-xs text-muted-foreground/70">
-                {query ? "Prueba con otro nombre o número." : "Los mensajes de Envíos aparecerán aquí."}
+                {unreadOnly
+                  ? "No hay chats no leídos con estos filtros."
+                  : query || selectedTagFilterId != null
+                    ? "Prueba con otro nombre, número o etiqueta."
+                    : "Los mensajes de Envíos aparecerán aquí."}
               </p>
             </div>
           ) : conversations.map((conversation) => (
-            <button
+            <div
               key={conversation.id}
-              type="button"
+              role="button"
+              tabIndex={0}
               onClick={() => void selectConversation(conversation)}
+              onKeyDown={(event) => {
+                if (event.currentTarget !== event.target) return
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault()
+                  void selectConversation(conversation)
+                }
+              }}
               className={cn(
                 "group relative flex w-full gap-3 border-b border-border px-3 py-3 text-left transition-colors hover:bg-muted/60",
                 selected?.id === conversation.id ? "bg-muted" : "bg-background",
@@ -1029,13 +1140,41 @@ export function ShippingChatPanel() {
                   </div>
                 )}
                 <div className="mt-2 flex items-center justify-end gap-2 text-muted-foreground">
-                  <ChevronDownIcon className="h-3.5 w-3.5" />
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={(event) => event.stopPropagation()}
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-muted-foreground/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        aria-label={`Opciones de ${contactName(conversation)}`}
+                      >
+                        <ChevronDownIcon className="h-3.5 w-3.5" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent
+                      align="end"
+                      className="w-56"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <DropdownMenuItem
+                        disabled={conversation.unreadCount > 0 || readStatePendingIds.has(conversation.id)}
+                        onSelect={() => void updateReadState(conversation, true)}
+                      >
+                        <EnvelopeIcon className="h-4 w-4" />
+                        {readStatePendingIds.has(conversation.id)
+                          ? "Marcando..."
+                          : conversation.unreadCount > 0
+                            ? "Ya está marcado como no leído"
+                            : "Marcar como no leído"}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                   <span className="rounded bg-muted-foreground/35 px-1.5 py-0.5 text-[10px] font-semibold text-background">
                     {contactInitials(conversation)}
                   </span>
                 </div>
               </div>
-            </button>
+            </div>
           ))}
           {loadingMore && <p className="py-4 text-center text-xs text-muted-foreground">Cargando chats...</p>}
         </div>

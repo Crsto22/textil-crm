@@ -962,13 +962,17 @@ function AgentConversationStatus({ state, expiresAt }: { state: string | null; e
 function ConversationRow({
   conversation,
   accepting,
+  markingUnread,
   onAccept,
+  onMarkUnread,
   onSelect,
   tags,
 }: {
   conversation: CrmConversation;
   accepting?: boolean;
+  markingUnread?: boolean;
   onAccept?: () => void;
+  onMarkUnread: () => void;
   onSelect: () => void;
   tags: ConversationTag[];
 }) {
@@ -977,9 +981,17 @@ function ConversationRow({
   const mediaPreview = getConversationMediaPreview(conversation);
 
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onSelect}
+      onKeyDown={(event) => {
+        if (event.currentTarget !== event.target) return;
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onSelect();
+        }
+      }}
       className={`group relative flex w-full gap-3 border-b border-border px-3 py-3 text-left transition-colors hover:bg-muted/60 ${
         conversation.active ? "bg-muted" : "bg-background"
       }`}
@@ -1059,15 +1071,43 @@ function ConversationRow({
           ) : (
             <span />
           )}
-          <span className="flex items-center gap-2">
-          <ChevronDownIcon className="h-3.5 w-3.5" />
-          <span className="rounded bg-muted-foreground/35 px-1.5 py-0.5 text-[10px] font-semibold text-background">
-            {conversation.initials}
-          </span>
+          <span className="flex items-center gap-1.5">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  onClick={(event) => event.stopPropagation()}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-muted-foreground/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-label={`Opciones de ${conversation.displayName}`}
+                >
+                  <ChevronDownIcon className="h-3.5 w-3.5" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className="w-56"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <DropdownMenuItem
+                  disabled={hasUnread || markingUnread}
+                  onSelect={onMarkUnread}
+                >
+                  <EnvelopeIcon className="h-4 w-4" />
+                  {markingUnread
+                    ? "Marcando..."
+                    : hasUnread
+                      ? "Ya está marcado como no leído"
+                      : "Marcar como no leído"}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <span className="rounded bg-muted-foreground/35 px-1.5 py-0.5 text-[10px] font-semibold text-background">
+              {conversation.initials}
+            </span>
           </span>
         </div>
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -1886,6 +1926,7 @@ function SalesChatPage() {
   const [isOlderMessagesLoading, setIsOlderMessagesLoading] = useState(false);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [activeConversationSnapshot, setActiveConversationSnapshot] = useState<CrmConversation | null>(null);
+  const [readStatePendingIds, setReadStatePendingIds] = useState<Set<string>>(() => new Set());
   const setChatError = (...messages: string[]) => {
     void messages;
   };
@@ -2208,6 +2249,90 @@ function SalesChatPage() {
     }
   }, [storeMessageCache]);
 
+  const updateConversationReadState = async (conversationId: string, unread: boolean) => {
+    const previousConversation = conversationsRef.current.find((conversation) => conversation.id === conversationId)
+      ?? (activeConversationSnapshot?.id === conversationId ? activeConversationSnapshot : null);
+    const previousUnreadCount = previousConversation?.unreadCount ?? 0;
+    if ((!unread && previousUnreadCount === 0) || (unread && previousUnreadCount > 0)) return;
+
+    const optimisticConversation = previousConversation
+      ? {
+          ...previousConversation,
+          unreadCount: unread ? Math.max(1, previousUnreadCount) : 0,
+        }
+      : null;
+    const wasInList = conversationsRef.current.some((conversation) => conversation.id === conversationId);
+    const adjustUnreadCounts = (delta: number) => {
+      if (!previousConversation || !unreadOnly) return;
+      const decrementSafely = (value: number) => Math.max(0, value + delta);
+      setConversationCounts((current) => {
+        const next = { ...current, all: decrementSafely(current.all) };
+        if (previousConversation.attentionQueue === "AGENT_ACTIVE") {
+          next.agent = decrementSafely(current.agent);
+        } else if (previousConversation.status === "RESUELTO" || previousConversation.attentionQueue === "RESOLVED") {
+          next.resolved = decrementSafely(current.resolved);
+        } else if (!previousConversation.assignedUserId) {
+          next.waiting = decrementSafely(current.waiting);
+        } else {
+          next.attended = decrementSafely(current.attended);
+        }
+        if (previousConversation.assignedUserId === user?.idUsuario && previousConversation.status !== "RESUELTO") {
+          next.mine = decrementSafely(current.mine);
+        }
+        return next;
+      });
+    };
+    setReadStatePendingIds((current) => new Set(current).add(conversationId));
+
+    if (optimisticConversation) {
+      setActiveConversationSnapshot((current) => current?.id === conversationId ? optimisticConversation : current);
+      setConversations((current) => {
+        let next = current.map((conversation) => conversation.id === conversationId ? optimisticConversation : conversation);
+        if (!unread && unreadOnly) next = next.filter((conversation) => conversation.id !== conversationId);
+        conversationsRef.current = next;
+        return next;
+      });
+      if (!unread && previousUnreadCount > 0) adjustUnreadCounts(-1);
+    }
+
+    try {
+      const response = await authFetch(`/api/crm/whatsapp/conversations/${conversationId}/read-state`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ unread }),
+      });
+      if (!response.ok) {
+        throw new Error(await readApiMessage(response, "No se pudo actualizar el estado de lectura"));
+      }
+      const updatedConversation = (await response.json()) as CrmConversationResponse;
+      realtimeEventHandlerRef.current({
+        type: "conversation.updated",
+        conversationId: updatedConversation.id,
+        conversation: updatedConversation,
+      });
+    } catch (error) {
+      if (previousConversation) {
+        setActiveConversationSnapshot((current) => current?.id === conversationId ? previousConversation : current);
+        setConversations((current) => {
+          let next = current.map((conversation) => conversation.id === conversationId ? previousConversation : conversation);
+          if (wasInList && !next.some((conversation) => conversation.id === conversationId)) {
+            next = [previousConversation, ...next];
+          }
+          conversationsRef.current = next;
+          return next;
+        });
+        if (!unread && previousUnreadCount > 0) adjustUnreadCounts(1);
+      }
+      toast.error(error instanceof Error ? error.message : "No se pudo actualizar el estado de lectura");
+    } finally {
+      setReadStatePendingIds((current) => {
+        const next = new Set(current);
+        next.delete(conversationId);
+        return next;
+      });
+    }
+  };
+
   const switchConversation = async (conversationId: string) => {
     if (activeConversationId) {
       allMessagesRef.current = { ...allMessagesRef.current, [activeConversationId]: messages };
@@ -2220,6 +2345,7 @@ function SalesChatPage() {
     setActiveConversationId(conversationId);
     activeConversationIdRef.current = conversationId;
     setChatError("");
+    void updateConversationReadState(conversationId, false);
     try {
       const cachedMessages = allMessagesRef.current[conversationId];
       const cachedMeta = messageCacheMetaRef.current[conversationId];
@@ -4807,12 +4933,14 @@ function SalesChatPage() {
                   key={conversation.id}
                   conversation={{ ...conversation, active: conversation.id === activeConversationId }}
                   accepting={acceptingConversationId === conversation.id}
+                  markingUnread={readStatePendingIds.has(conversation.id)}
                   onAccept={
                     conversation.status !== "RESUELTO"
                       && !conversation.assignedUserId
                       ? () => void handleAcceptCurrent(conversation.id)
                       : undefined
                   }
+                  onMarkUnread={() => void updateConversationReadState(conversation.id, true)}
                   onSelect={() => { void switchConversation(conversation.id); setMobileView("conversation"); }}
                   tags={conversation.tags ?? []}
                 />

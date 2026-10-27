@@ -29,7 +29,8 @@ import { conversationDayKey, formatConversationDayLabel, formatConversationListD
 import { WarehouseChatComposer } from "@/components/chat/WarehouseChatComposer"
 import { WarehouseMessageBubble, type WarehouseChatMessage } from "@/components/chat/WarehouseMessageBubble"
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { authFetch } from "@/lib/auth/auth-fetch"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -161,6 +162,7 @@ export function ShippingChatPanel() {
   const [tagSaving, setTagSaving] = useState(false)
   const [newTagLabel, setNewTagLabel] = useState("")
   const [newTagColor, setNewTagColor] = useState(TAG_COLORS[0])
+  const [isMobileTagDrawer, setIsMobileTagDrawer] = useState(false)
   const [mobileView, setMobileView] = useState<"list" | "conversation">("list")
   const selectedRef = useRef<ShippingConversation | null>(null)
   const dragDepthRef = useRef(0)
@@ -438,6 +440,14 @@ export function ShippingChatPanel() {
     const timer = window.setTimeout(() => void loadAvailableTags(), 0)
     return () => window.clearTimeout(timer)
   }, [loadAvailableTags])
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 639px)")
+    const update = () => setIsMobileTagDrawer(media.matches)
+    update()
+    media.addEventListener("change", update)
+    return () => media.removeEventListener("change", update)
+  }, [])
 
   useEffect(() => {
     const list = conversationListRef.current
@@ -820,6 +830,47 @@ export function ShippingChatPanel() {
   const blocked = connection == null || connection.status !== "CONNECTED"
     || Boolean(connection.phoneChanged || connection.operationsBlocked)
   const activeAttachment = pendingAttachments.find((item) => item.id === activeAttachmentId) ?? pendingAttachments[0]
+  const tagManagerContent = (
+    <div className="space-y-5">
+      <div>
+        <label className="mb-1.5 block text-sm font-medium">Nombre de la etiqueta</label>
+        <input value={newTagLabel} onChange={(event) => setNewTagLabel(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void createAndAssignTag() }} maxLength={80} placeholder="Ej: Urgente, Seguimiento..." className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none" />
+      </div>
+      <div>
+        <p className="mb-2 text-sm font-medium">Color</p>
+        <div className="flex flex-wrap gap-2">
+          {TAG_COLORS.map((color) => <button key={color} type="button" onClick={() => setNewTagColor(color)} className={cn("h-8 w-8 rounded-lg transition-transform", newTagColor === color ? "scale-110 ring-2 ring-foreground ring-offset-2" : "hover:scale-105")} style={{ backgroundColor: color }} aria-label={`Usar color ${color}`}>{newTagColor === color && <CheckIcon className="mx-auto h-4 w-4 text-white" />}</button>)}
+        </div>
+      </div>
+      <Button type="button" onClick={() => void createAndAssignTag()} disabled={tagSaving || newTagLabel.trim().length < 2} className="w-full">
+        {tagSaving ? "Guardando..." : "Crear y asignar"}
+      </Button>
+      <div>
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Etiquetas disponibles</p>
+        {tagsLoading ? <p className="text-sm text-muted-foreground">Cargando etiquetas...</p> : (
+          <div className="flex flex-wrap gap-2">
+            {availableTags.filter((tag) => !selected?.tags?.some((activeTag) => activeTag.id === tag.id)).map((tag) => (
+              <button key={tag.id} type="button" onClick={() => void assignTag(tag.id)} disabled={tagSaving} className="rounded-full px-3 py-1 text-xs font-semibold text-white disabled:opacity-50" style={{ backgroundColor: tag.color }}>{tag.label}</button>
+            ))}
+            {!availableTags.some((tag) => !selected?.tags?.some((activeTag) => activeTag.id === tag.id)) && <span className="text-xs text-muted-foreground">No hay etiquetas pendientes de asignar.</span>}
+          </div>
+        )}
+      </div>
+      {selected?.tags?.length ? (
+        <div>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Etiquetas actuales</p>
+          <div className="flex flex-wrap gap-2">
+            {selected.tags.map((tag) => (
+              <span key={tag.id} className="inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold text-white" style={{ backgroundColor: tag.color }}>
+                {tag.label}
+                <button type="button" onClick={() => void removeTag(tag.id)} disabled={tagSaving} className="rounded-full p-0.5 hover:bg-black/15 disabled:opacity-50" aria-label={`Quitar ${tag.label}`}><XMarkIcon className="h-3 w-3" /></button>
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
   const blockedReason = connection?.phoneChanged
     ? "Un administrador debe confirmar el nuevo número antes de responder mensajes."
     : "WhatsApp de Envíos está desconectado. Ve a Conexiones para volver a vincularlo."
@@ -1134,53 +1185,25 @@ export function ShippingChatPanel() {
         )}
       </div>
       </div>
-      <Dialog open={tagModalOpen} onOpenChange={setTagModalOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Etiquetas de Envíos</DialogTitle>
-            <DialogDescription>Clasifica esta conversación sin modificar las etiquetas del chat de Ventas.</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-5">
-            <div>
-              <label className="mb-1.5 block text-sm font-medium">Nombre de la etiqueta</label>
-              <input value={newTagLabel} onChange={(event) => setNewTagLabel(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void createAndAssignTag() }} maxLength={80} placeholder="Ej: Urgente, Seguimiento..." className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-500/20" />
-            </div>
-            <div>
-              <p className="mb-2 text-sm font-medium">Color</p>
-              <div className="flex flex-wrap gap-2">
-                {TAG_COLORS.map((color) => <button key={color} type="button" onClick={() => setNewTagColor(color)} className={cn("h-8 w-8 rounded-lg transition-transform", newTagColor === color ? "scale-110 ring-2 ring-foreground ring-offset-2" : "hover:scale-105")} style={{ backgroundColor: color }} aria-label={`Usar color ${color}`}>{newTagColor === color && <CheckIcon className="mx-auto h-4 w-4 text-white" />}</button>)}
-              </div>
-            </div>
-            <Button type="button" onClick={() => void createAndAssignTag()} disabled={tagSaving || newTagLabel.trim().length < 2} className="w-full">
-              {tagSaving ? "Guardando..." : "Crear y asignar"}
-            </Button>
-            <div>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Etiquetas disponibles</p>
-              {tagsLoading ? <p className="text-sm text-muted-foreground">Cargando etiquetas...</p> : (
-                <div className="flex flex-wrap gap-2">
-                  {availableTags.filter((tag) => !selected?.tags?.some((activeTag) => activeTag.id === tag.id)).map((tag) => (
-                    <button key={tag.id} type="button" onClick={() => void assignTag(tag.id)} disabled={tagSaving} className="rounded-full px-3 py-1 text-xs font-semibold text-white disabled:opacity-50" style={{ backgroundColor: tag.color }}>{tag.label}</button>
-                  ))}
-                  {!availableTags.some((tag) => !selected?.tags?.some((activeTag) => activeTag.id === tag.id)) && <span className="text-xs text-muted-foreground">No hay etiquetas pendientes de asignar.</span>}
-                </div>
-              )}
-            </div>
-            {selected?.tags?.length ? (
-              <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Etiquetas actuales</p>
-                <div className="flex flex-wrap gap-2">
-                  {selected.tags.map((tag) => (
-                    <span key={tag.id} className="inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold text-white" style={{ backgroundColor: tag.color }}>
-                      {tag.label}
-                      <button type="button" onClick={() => void removeTag(tag.id)} disabled={tagSaving} className="rounded-full p-0.5 hover:bg-black/15 disabled:opacity-50" aria-label={`Quitar ${tag.label}`}><XMarkIcon className="h-3 w-3" /></button>
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-          </div>
-        </DialogContent>
-      </Dialog>
+      {isMobileTagDrawer ? (
+        <Sheet open={tagModalOpen} onOpenChange={setTagModalOpen}>
+          <SheetContent side="bottom" className="max-h-[88dvh] overflow-y-auto rounded-t-3xl px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-5">
+            <SheetHeader className="mb-5 pr-8">
+              <SheetTitle>Etiquetas de Envíos</SheetTitle>
+            </SheetHeader>
+            {tagManagerContent}
+          </SheetContent>
+        </Sheet>
+      ) : (
+        <Dialog open={tagModalOpen} onOpenChange={setTagModalOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Etiquetas de Envíos</DialogTitle>
+            </DialogHeader>
+            {tagManagerContent}
+          </DialogContent>
+        </Dialog>
+      )}
       {activeAttachment ? (
         <div className="fixed inset-0 z-[90] flex flex-col bg-[#0b141a] text-white" role="dialog" aria-modal="true" aria-label="Archivos para enviar">
           <input ref={previewFileInputRef} type="file" multiple accept="image/*,video/*,audio/*,application/pdf,.doc,.docx,.xls,.xlsx,.txt" className="hidden" onChange={(event) => { addPendingFiles(Array.from(event.target.files || [])); event.target.value = "" }} />

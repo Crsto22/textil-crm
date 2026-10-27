@@ -455,7 +455,8 @@ export function ShippingChatPanel() {
 
     const loadUntilScrollable = () => {
       const doesNotFillViewport = list.scrollHeight <= list.clientHeight + 1
-      if (doesNotFillViewport && hasMoreConversationsRef.current && !loadingMoreRef.current) {
+      const fewerThanTwoPagesLoaded = conversationPageRef.current < 1
+      if (doesNotFillViewport && fewerThanTwoPagesLoaded && hasMoreConversationsRef.current && !loadingMoreRef.current) {
         void loadConversations("append")
       }
     }
@@ -795,6 +796,7 @@ export function ShippingChatPanel() {
       setConversationTags(selected.id, tags)
       setNewTagLabel("")
       setNewTagColor(TAG_COLORS[0])
+      setTagModalOpen(false)
       toast.success(existing ? "Etiqueta asignada" : "Etiqueta creada y asignada")
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No se pudo crear la etiqueta")

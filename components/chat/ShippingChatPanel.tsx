@@ -834,7 +834,7 @@ export function ShippingChatPanel() {
     <div className="space-y-5">
       <div>
         <label className="mb-1.5 block text-sm font-medium">Nombre de la etiqueta</label>
-        <input value={newTagLabel} onChange={(event) => setNewTagLabel(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void createAndAssignTag() }} maxLength={80} placeholder="Ej: Urgente, Seguimiento..." className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none" />
+        <input value={newTagLabel} onChange={(event) => setNewTagLabel(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void createAndAssignTag() }} maxLength={80} placeholder="Ej: Urgente, Seguimiento..." className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-500/20" />
       </div>
       <div>
         <p className="mb-2 text-sm font-medium">Color</p>
@@ -1196,7 +1196,7 @@ export function ShippingChatPanel() {
         </Sheet>
       ) : (
         <Dialog open={tagModalOpen} onOpenChange={setTagModalOpen}>
-          <DialogContent className="sm:max-w-md">
+          <DialogContent className="sm:max-w-md" onOpenAutoFocus={(event) => event.preventDefault()}>
             <DialogHeader>
               <DialogTitle>Etiquetas de Envíos</DialogTitle>
             </DialogHeader>

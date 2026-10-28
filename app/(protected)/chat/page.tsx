@@ -2689,7 +2689,7 @@ function SalesChatPage() {
       const exists = current.some((item) => item.id === mappedConversation.id);
       let next = current.filter((item) => item.id !== mappedConversation.id);
       if (event.type !== "conversation.removed" && matchesActiveList && (exists || (!conversationSearch && !selectedTagFilterId))) {
-        next = isInternalActivity && exists
+        next = exists && (isInternalActivity || event.type !== "message.created")
           ? current.map((item) => item.id === mappedConversation.id ? mappedConversation : item)
           : [mappedConversation, ...next].slice(0, Math.max(CONVERSATION_PAGE_SIZE, current.length));
       }
@@ -2718,7 +2718,7 @@ function SalesChatPage() {
             : mappedConversation.attentionQueue === ({ ATTENDED: "HUMAN_ACTIVE", RESOLVED: "RESOLVED" } as Record<string, AttentionQueue>)[cacheView])
         && (exists || (!cacheSearch && !cacheTag))
       ) {
-        items = isInternalActivity && exists
+        items = exists && (isInternalActivity || event.type !== "message.created")
           ? entry.items.map((item) => item.id === mappedConversation.id ? mappedConversation : item)
           : [mappedConversation, ...items].slice(0, Math.max(CONVERSATION_PAGE_SIZE, entry.items.length));
       }

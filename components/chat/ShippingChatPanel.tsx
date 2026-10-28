@@ -1,11 +1,12 @@
 "use client"
 
-import { Fragment, useCallback, useEffect, useRef, useState, type DragEvent, type UIEvent } from "react"
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type UIEvent } from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import {
   ArrowLeftIcon,
   ArrowPathIcon,
+  BoltIcon,
   ChatBubbleLeftRightIcon,
   CheckIcon,
   CheckCircleIcon,
@@ -24,6 +25,7 @@ import {
 } from "@heroicons/react/24/outline"
 
 import { ChatAvatar } from "@/components/chat/ChatAvatar"
+import { AuthenticatedImageThumbnail } from "@/components/chat/AuthenticatedImageThumbnail"
 import { ChatDateSeparator } from "@/components/chat/ChatDateSeparator"
 import { ChatConversationSkeletons, ChatMessageSkeletons } from "@/components/chat/ChatLoadingSkeletons"
 import { ChatWallpaperLayer } from "@/components/chat/ChatWallpaperLayer"
@@ -40,6 +42,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { authFetch } from "@/lib/auth/auth-fetch"
+import type { QuickMessage } from "@/lib/crm/quick-messages"
+import { readQuickMessageApiError } from "@/lib/crm/quick-messages"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 
@@ -165,6 +169,10 @@ export function ShippingChatPanel() {
   const [salesLoadingOlder, setSalesLoadingOlder] = useState(false)
   const [draft, setDraft] = useState("")
   const [sending, setSending] = useState(false)
+  const [quickMessages, setQuickMessages] = useState<QuickMessage[]>([])
+  const [quickMessagesLoading, setQuickMessagesLoading] = useState(true)
+  const [quickCommandIndex, setQuickCommandIndex] = useState(0)
+  const [quickCommandMenuDismissed, setQuickCommandMenuDismissed] = useState(false)
   const [isDraggingFiles, setIsDraggingFiles] = useState(false)
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([])
   const [activeAttachmentId, setActiveAttachmentId] = useState<string | null>(null)
@@ -212,6 +220,36 @@ export function ShippingChatPanel() {
   useEffect(() => { chatTabRef.current = chatTab }, [chatTab])
   useEffect(() => { conversationsRef.current = conversations }, [conversations])
   useEffect(() => { newestIdRef.current = newestId }, [newestId])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    void authFetch("/api/crm/whatsapp/quick-messages?area=SHIPPING", {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(await readQuickMessageApiError(response, "No se pudieron cargar los comandos"))
+        setQuickMessages((await response.json()) as QuickMessage[])
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) toast.error(error instanceof Error ? error.message : "No se pudieron cargar los comandos")
+      })
+      .finally(() => { if (!controller.signal.aborted) setQuickMessagesLoading(false) })
+    return () => controller.abort()
+  }, [])
+
+  const quickCommandQuery = draft.match(/^\/([a-z0-9_-]*)$/i)?.[1]?.toLowerCase() ?? null
+  const matchingQuickMessages = useMemo(() => quickCommandQuery == null
+    ? []
+    : quickMessages.filter((command) => command.keyword.toLowerCase().includes(quickCommandQuery)),
+  [quickCommandQuery, quickMessages])
+  const showQuickCommandMenu = quickCommandQuery != null && !quickCommandMenuDismissed
+
+  function updateDraft(value: string) {
+    setDraft(value)
+    setQuickCommandIndex(0)
+    setQuickCommandMenuDismissed(false)
+  }
 
   useEffect(() => () => {
     pendingAttachmentsRef.current.forEach((item) => URL.revokeObjectURL(item.url))
@@ -710,6 +748,92 @@ export function ShippingChatPanel() {
     } finally {
       setSending(false)
     }
+  }
+
+  function addSentMessages(conversationId: number, sentMessages: WarehouseChatMessage[]) {
+    if (sentMessages.length === 0) return
+    const updateCache = (current: WarehouseChatMessage[]) => {
+      const items = Array.from(new Map([...current, ...sentMessages].map((item) => [item.id, item])).values())
+      const cached = messageCacheRef.current[conversationId]
+      messageCacheRef.current[conversationId] = {
+        items,
+        oldestId: cached?.oldestId ?? items[0]?.id ?? null,
+        newestId: items.at(-1)?.id ?? cached?.newestId ?? null,
+        hasMoreBefore: cached?.hasMoreBefore ?? false,
+      }
+      return items
+    }
+    if (selectedRef.current?.id === conversationId) setMessages(updateCache)
+    else updateCache(messageCacheRef.current[conversationId]?.items ?? [])
+    const latestId = sentMessages.at(-1)?.id
+    if (selectedRef.current?.id === conversationId) {
+      if (latestId != null) setNewestId(latestId)
+      requestAnimationFrame(() => {
+        if (messageScrollRef.current) messageScrollRef.current.scrollTop = messageScrollRef.current.scrollHeight
+      })
+    }
+  }
+
+  async function sendQuickMessage(command: QuickMessage) {
+    if (!selected || sending) return
+    const conversationId = selected.id
+    const sentMessages: WarehouseChatMessage[] = []
+    setSending(true)
+    setQuickCommandMenuDismissed(true)
+    try {
+      for (let index = 0; index < command.blocks.length; index += 1) {
+        const block = command.blocks[index]
+        const response = await authFetch(
+          `/api/crm/whatsapp/quick-messages/${command.id}/blocks/${block.id}/send`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ conversationId }),
+          },
+        )
+        if (!response.ok) {
+          throw new Error(await readQuickMessageApiError(response, `No se pudo enviar el bloque ${index + 1}`))
+        }
+        sentMessages.push((await response.json()) as WarehouseChatMessage)
+      }
+      addSentMessages(conversationId, sentMessages)
+      setDraft("")
+      toast.success(`/${command.keyword} enviado`)
+      void loadConversations("refresh")
+    } catch (error) {
+      addSentMessages(conversationId, sentMessages)
+      const detail = error instanceof Error ? error.message : "No se pudo enviar el comando"
+      toast.error(`${sentMessages.length} de ${command.blocks.length} bloques enviados. ${detail}`)
+    } finally {
+      setSending(false)
+    }
+  }
+
+  function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    if (showQuickCommandMenu && matchingQuickMessages.length > 0) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault()
+        setQuickCommandIndex((current) => (current + 1) % matchingQuickMessages.length)
+        return true
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault()
+        setQuickCommandIndex((current) => (current - 1 + matchingQuickMessages.length) % matchingQuickMessages.length)
+        return true
+      }
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault()
+        const command = matchingQuickMessages[Math.min(quickCommandIndex, matchingQuickMessages.length - 1)]
+        if (command) void sendQuickMessage(command)
+        return true
+      }
+    }
+    if (event.key === "Escape" && showQuickCommandMenu) {
+      event.preventDefault()
+      setQuickCommandMenuDismissed(true)
+      return true
+    }
+    return false
   }
 
   async function sendFile(file: File, caption = "") {
@@ -1318,15 +1442,56 @@ export function ShippingChatPanel() {
             ) : (
             <footer className="relative z-20 shrink-0 bg-muted/60 px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] md:px-3 md:pb-3">
               <ChatWallpaperLayer />
+              {showQuickCommandMenu && (
+                <div className="absolute bottom-full left-2 right-2 z-40 mb-2 overflow-hidden rounded-2xl border border-border bg-background shadow-2xl md:left-3 md:right-auto md:w-[440px]">
+                  <div className="flex items-center gap-2 border-b border-border px-4 py-2.5 text-xs font-semibold text-muted-foreground">
+                    <BoltIcon className="h-4 w-4 text-emerald-500" /> Comandos de Envios
+                  </div>
+                  {quickMessagesLoading ? (
+                    <p className="px-4 py-4 text-sm text-muted-foreground">Cargando comandos...</p>
+                  ) : matchingQuickMessages.length === 0 ? (
+                    <p className="px-4 py-4 text-sm text-muted-foreground">No hay comandos para /{quickCommandQuery}.</p>
+                  ) : (
+                    <div className="max-h-[min(55vh,480px)] overflow-y-auto p-1.5">
+                      {matchingQuickMessages.map((command, index) => {
+                        const text = command.blocks.map((block) => block.body?.trim()).filter(Boolean).join("\n\n")
+                        const images = command.blocks.filter((block) => block.type === "IMAGE" && block.mediaUrl)
+                        return (
+                          <button
+                            key={command.id}
+                            type="button"
+                            disabled={sending}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => void sendQuickMessage(command)}
+                            className={cn("mb-1 flex w-full flex-col rounded-xl px-3 py-3 text-left transition-colors last:mb-0 disabled:cursor-wait disabled:opacity-60", index === quickCommandIndex ? "bg-emerald-50 dark:bg-emerald-500/10" : "hover:bg-muted")}
+                          >
+                            <span className="flex w-full items-center justify-between gap-3">
+                              <span className="font-mono text-sm font-bold text-foreground">/{command.keyword}</span>
+                              <span className="shrink-0 text-[10px] font-semibold text-muted-foreground">{command.blocks.length} bloque{command.blocks.length === 1 ? "" : "s"}</span>
+                            </span>
+                            {text && <span className="mt-1.5 line-clamp-3 whitespace-pre-wrap break-words text-xs leading-5 text-muted-foreground">{text}</span>}
+                            {images.length > 0 && (
+                              <span className="mt-2 flex w-full flex-wrap gap-2">
+                                {images.map((block) => <AuthenticatedImageThumbnail key={block.id} src={block.mediaUrl} alt={block.fileName || "Imagen del comando"} className="h-12 w-12 rounded-lg border border-border bg-muted bg-cover bg-center bg-no-repeat shadow-sm" />)}
+                              </span>
+                            )}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
               <WarehouseChatComposer
                 value={draft}
-                onChange={setDraft}
+                onChange={updateDraft}
                 onSendText={sendText}
                 onSendFile={sendFile}
                 onSelectFiles={addPendingFiles}
                 disabled={blocked}
                 sending={sending}
                 placeholder={blocked ? blockedReason : "Escribe un mensaje"}
+                onInputKeyDown={handleComposerKeyDown}
               />
             </footer>
             )}

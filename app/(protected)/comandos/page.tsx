@@ -17,7 +17,9 @@ import { Button } from "@/components/ui/button"
 import { AuthenticatedImageThumbnail } from "@/components/chat/AuthenticatedImageThumbnail"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { authFetch } from "@/lib/auth/auth-fetch"
-import type { QuickMessage } from "@/lib/crm/quick-messages"
+import { useAuth } from "@/lib/auth/auth-context"
+import { isCrmAdmin } from "@/lib/auth/roles"
+import type { QuickMessage, QuickMessageArea } from "@/lib/crm/quick-messages"
 import { readQuickMessageApiError } from "@/lib/crm/quick-messages"
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
@@ -39,6 +41,12 @@ const newTextBlock = (): DraftBlock => ({
 })
 
 export default function ComandosPage() {
+  const { user, isLoading: authLoading } = useAuth()
+  const normalizedRole = user?.rol?.trim().toUpperCase()
+  const canSwitchArea = isCrmAdmin(user?.rol) || normalizedRole === "VENTAS_ALMACEN"
+  const defaultArea: QuickMessageArea = normalizedRole === "ALMACEN" ? "SHIPPING" : "SALES"
+  const [selectedArea, setSelectedArea] = useState<QuickMessageArea>("SALES")
+  const area = canSwitchArea ? selectedArea : defaultArea
   const [commands, setCommands] = useState<QuickMessage[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState("")
@@ -50,22 +58,28 @@ export default function ComandosPage() {
   const [deletingId, setDeletingId] = useState<number | null>(null)
   const imageInputRef = useRef<HTMLInputElement>(null)
 
-  const loadCommands = useCallback(async () => {
+  const loadCommands = useCallback(async (signal?: AbortSignal) => {
+    if (authLoading) return
     setLoading(true)
     try {
-      const response = await authFetch("/api/crm/whatsapp/quick-messages", { cache: "no-store" })
+      const response = await authFetch(`/api/crm/whatsapp/quick-messages?area=${area}`, { cache: "no-store", signal })
       if (!response.ok) throw new Error(await readQuickMessageApiError(response, "No se pudieron cargar los comandos"))
+      if (signal?.aborted) return
       setCommands((await response.json()) as QuickMessage[])
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "No se pudieron cargar los comandos")
+      if (!signal?.aborted) toast.error(error instanceof Error ? error.message : "No se pudieron cargar los comandos")
     } finally {
-      setLoading(false)
+      if (!signal?.aborted) setLoading(false)
     }
-  }, [])
+  }, [area, authLoading])
 
   useEffect(() => {
-    const timeoutId = window.setTimeout(() => { void loadCommands() }, 0)
-    return () => window.clearTimeout(timeoutId)
+    const controller = new AbortController()
+    const timeoutId = window.setTimeout(() => { void loadCommands(controller.signal) }, 0)
+    return () => {
+      controller.abort()
+      window.clearTimeout(timeoutId)
+    }
   }, [loadCommands])
 
   const filteredCommands = useMemo(() => {
@@ -165,6 +179,7 @@ export default function ComandosPage() {
     const formData = new FormData()
     formData.append("payload", JSON.stringify({
       keyword: normalizedKeyword,
+      area,
       blocks: orderedBlocks.map((block) => ({ id: block.id ?? null, type: block.type, body: block.body.trim() })),
     }))
     orderedBlocks.forEach((block) => {
@@ -208,15 +223,42 @@ export default function ComandosPage() {
 
   const editorTextBlock = blocks.find((block) => block.type === "TEXT")
   const editorImageBlocks = blocks.filter((block) => block.type === "IMAGE")
+  const areaLabel = area === "SHIPPING" ? "Envios" : "Ventas"
+
+  const changeArea = (nextArea: QuickMessageArea) => {
+    if (nextArea === area) return
+    setEditorOpen(false)
+    resetEditor()
+    setSearch("")
+    setSelectedArea(nextArea)
+  }
 
   return (
     <div className="-m-6 min-h-full space-y-5 p-4 sm:p-5">
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-        <h2 className="text-xl font-bold text-foreground">Comandos y mensajes rapidos</h2>
+        <div>
+          <h2 className="text-xl font-bold text-foreground">Comandos de {areaLabel}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Respuestas rapidas exclusivas del chat de {areaLabel.toLowerCase()}.</p>
+        </div>
         <Button onClick={openCreate} className="gap-2 rounded-xl">
           <PlusIcon className="h-4 w-4" /> Nuevo comando
         </Button>
       </div>
+
+      {canSwitchArea && (
+        <div className="inline-flex rounded-xl border border-border bg-muted/40 p-1" aria-label="Area de comandos">
+          {(["SALES", "SHIPPING"] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              onClick={() => changeArea(option)}
+              className={`rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${area === option ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              {option === "SALES" ? "Ventas" : "Envios"}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="relative max-w-md">
         <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -272,8 +314,8 @@ export default function ComandosPage() {
       <Dialog open={editorOpen} onOpenChange={(open) => { setEditorOpen(open); if (!open) resetEditor() }}>
         <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{editingId ? "Editar comando" : "Nuevo comando"}</DialogTitle>
-            <DialogDescription>Escribe el mensaje y agrega las imagenes que se enviaran despues.</DialogDescription>
+            <DialogTitle>{editingId ? "Editar" : "Nuevo"} comando de {areaLabel}</DialogTitle>
+            <DialogDescription>Escribe el mensaje y agrega las imagenes que se enviaran despues en el chat de {areaLabel.toLowerCase()}.</DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">

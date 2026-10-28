@@ -27,7 +27,7 @@ export function canAccessCrmPath(
   if (isCrmAdmin(user?.rol)) return true
   const normalizedRole = user?.rol?.trim().toUpperCase()
   if (pathname === COMMANDS_PATH || pathname.startsWith(`${COMMANDS_PATH}/`)) {
-    return normalizedRole === "VENTAS" || normalizedRole === "VENTAS_ALMACEN"
+    return normalizedRole === "VENTAS" || normalizedRole === "ALMACEN" || normalizedRole === "VENTAS_ALMACEN"
   }
   if (pathname === WAREHOUSE_PATH || pathname.startsWith(`${WAREHOUSE_PATH}/`)) {
     return isWarehouseUser(user?.rol)

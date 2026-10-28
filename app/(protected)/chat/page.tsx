@@ -2093,7 +2093,7 @@ function SalesChatPage() {
 
   useEffect(() => {
     const controller = new AbortController();
-    void authFetch("/api/crm/whatsapp/quick-messages", { cache: "no-store", signal: controller.signal })
+    void authFetch("/api/crm/whatsapp/quick-messages?area=SALES", { cache: "no-store", signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error(await readQuickMessageApiError(response, "No se pudieron cargar los comandos"));
         setQuickMessages((await response.json()) as QuickMessage[]);

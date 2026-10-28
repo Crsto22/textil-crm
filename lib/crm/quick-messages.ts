@@ -11,11 +11,14 @@ export interface QuickMessageBlock {
 export interface QuickMessage {
   id: number
   keyword: string
+  area: QuickMessageArea
   blocks: QuickMessageBlock[]
   createdBy: string
   createdAt: string
   updatedAt: string
 }
+
+export type QuickMessageArea = "SALES" | "SHIPPING"
 
 export interface QuickMessageSendResponse<Message> {
   status: "COMPLETED" | "PARTIAL" | "FAILED"

@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic"
 import { useEffect, useRef, useState } from "react"
+import type { KeyboardEvent as ReactKeyboardEvent } from "react"
 import { EmojiStyle, SuggestionMode, Theme } from "emoji-picker-react"
 import {
   ArrowPathIcon,
@@ -35,6 +36,7 @@ export function WarehouseChatComposer({
   disabled,
   sending,
   placeholder,
+  onInputKeyDown,
 }: {
   value: string
   onChange: (value: string) => void
@@ -44,6 +46,7 @@ export function WarehouseChatComposer({
   disabled?: boolean
   sending?: boolean
   placeholder: string
+  onInputKeyDown?: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => boolean | void
 }) {
   const { resolvedTheme } = useTheme()
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -175,7 +178,7 @@ export function WarehouseChatComposer({
               {emojiOpen && <div className="absolute bottom-full left-0 z-50 mb-4 w-[min(352px,calc(100vw-2rem))] overflow-hidden rounded-xl border border-border bg-popover shadow-2xl"><EmojiPicker onEmojiClick={(emoji) => insertEmoji(emoji.emoji)} width="100%" height={390} theme={resolvedTheme === "dark" ? Theme.DARK : Theme.LIGHT} emojiStyle={EmojiStyle.NATIVE} lazyLoadEmojis searchPlaceholder="Buscar emoji" previewConfig={{ showPreview: false }} suggestedEmojisMode={SuggestionMode.RECENT} className="!border-0" /></div>}
             </div>
             <button type="button" onClick={() => fileRef.current?.click()} disabled={disabled || sending} className="mb-1 flex h-9 w-7 items-center justify-center rounded-full text-foreground hover:bg-muted disabled:opacity-40" aria-label="Adjuntar archivo"><DocumentPlusIcon className="h-5 w-5" /></button>
-            <textarea ref={inputRef} autoComplete="off" rows={1} value={value} onChange={(event) => onChange(event.target.value)} onInput={resize} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); if (value.trim()) void onSendText() } }} placeholder={placeholder} disabled={disabled || sending} className="sidebar-scroll max-h-[136px] min-h-10 min-w-0 flex-1 resize-none border-0 bg-transparent py-2 text-base leading-6 text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50 md:text-sm" />
+            <textarea ref={inputRef} autoComplete="off" rows={1} value={value} onChange={(event) => onChange(event.target.value)} onInput={resize} onKeyDown={(event) => { if (onInputKeyDown?.(event)) return; if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); if (value.trim()) void onSendText() } }} placeholder={placeholder} disabled={disabled || sending} className="sidebar-scroll max-h-[136px] min-h-10 min-w-0 flex-1 resize-none border-0 bg-transparent py-2 text-base leading-6 text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50 md:text-sm" />
             <button type="button" disabled={disabled || sending} onClick={() => value.trim() ? void onSendText() : void startRecording()} className="mb-1 flex h-9 w-7 items-center justify-center text-foreground disabled:opacity-40" aria-label={value.trim() ? "Enviar mensaje" : "Grabar audio"}>{sending ? <ArrowPathIcon className="h-5 w-5 animate-spin" /> : value.trim() ? <PaperAirplaneIcon className="h-5 w-5" /> : <MicrophoneIcon className="h-5 w-5" />}</button>
           </>
         )}

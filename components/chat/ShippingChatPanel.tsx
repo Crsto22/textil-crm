@@ -42,6 +42,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { authFetch } from "@/lib/auth/auth-fetch"
+import { useAuth } from "@/lib/auth/auth-context"
 import type { QuickMessage } from "@/lib/crm/quick-messages"
 import { readQuickMessageApiError } from "@/lib/crm/quick-messages"
 import { cn } from "@/lib/utils"
@@ -109,6 +110,25 @@ const MESSAGE_SIZE = 10
 const MESSAGE_CACHE_LIMIT = 5
 const TAG_COLORS = ["#3b82f6", "#22c55e", "#ef4444", "#eab308", "#a855f7", "#f97316", "#ec4899", "#14b8a6", "#6366f1", "#78716c"]
 
+type ShippingConversationCacheEntry = {
+  items: ShippingConversation[]
+  page: number
+  totalElements: number
+  hasMore: boolean
+  touchedAt: number
+}
+
+const shippingConversationCache = new Map<string, ShippingConversationCacheEntry>()
+const MAX_SHIPPING_CACHE_ENTRIES = 8
+
+function rememberShippingConversations(key: string, entry: Omit<ShippingConversationCacheEntry, "touchedAt">) {
+  shippingConversationCache.set(key, { ...entry, touchedAt: Date.now() })
+  if (shippingConversationCache.size <= MAX_SHIPPING_CACHE_ENTRIES) return
+  const oldestKey = [...shippingConversationCache.entries()]
+    .sort((left, right) => left[1].touchedAt - right[1].touchedAt)[0]?.[0]
+  if (oldestKey) shippingConversationCache.delete(oldestKey)
+}
+
 function contactName(conversation: ShippingConversation) {
   return conversation.contactName?.trim()
     || conversation.phoneNumber?.trim()
@@ -145,12 +165,15 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export function ShippingChatPanel() {
+  const { user } = useAuth()
   const searchParams = useSearchParams()
   const requestedConversationId = Number(searchParams.get("conversationId") || 0)
+  const cacheOwner = String(user?.idUsuario ?? "pending")
+  const initialCache = shippingConversationCache.get(`${cacheOwner}|||all`)
   const [queryInput, setQueryInput] = useState("")
   const [query, setQuery] = useState("")
-  const [conversations, setConversations] = useState<ShippingConversation[]>([])
-  const [loadingConversations, setLoadingConversations] = useState(true)
+  const [conversations, setConversations] = useState<ShippingConversation[]>(() => initialCache?.items ?? [])
+  const [loadingConversations, setLoadingConversations] = useState(!initialCache)
   const [loadingMore, setLoadingMore] = useState(false)
   const [listError, setListError] = useState("")
   const [selected, setSelected] = useState<ShippingConversation | null>(null)
@@ -189,15 +212,21 @@ export function ShippingChatPanel() {
   const [newTagColor, setNewTagColor] = useState(TAG_COLORS[0])
   const [isMobileTagDrawer, setIsMobileTagDrawer] = useState(false)
   const [mobileView, setMobileView] = useState<"list" | "conversation">("list")
+  const conversationCacheKey = useMemo(
+    () => `${cacheOwner}|${query}|${selectedTagFilterId ?? ""}|${unreadOnly ? "unread" : "all"}`,
+    [cacheOwner, query, selectedTagFilterId, unreadOnly],
+  )
   const selectedRef = useRef<ShippingConversation | null>(null)
   const dragDepthRef = useRef(0)
   const previewFileInputRef = useRef<HTMLInputElement | null>(null)
   const pendingAttachmentsRef = useRef<PendingAttachment[]>([])
   const chatTabRef = useRef<"sales" | "shipping">("shipping")
   const conversationsRef = useRef<ShippingConversation[]>([])
-  const conversationPageRef = useRef(0)
-  const hasMoreConversationsRef = useRef(false)
+  const conversationPageRef = useRef(initialCache?.page ?? 0)
+  const hasMoreConversationsRef = useRef(initialCache?.hasMore ?? false)
   const loadingMoreRef = useRef(false)
+  const listLoadingRef = useRef(false)
+  const queuedRefreshRef = useRef(false)
   const listRequestRef = useRef(0)
   const newestIdRef = useRef<number | null>(null)
   const messageRequestRef = useRef(0)
@@ -209,6 +238,7 @@ export function ShippingChatPanel() {
   const salesAbortRef = useRef<AbortController | null>(null)
   const salesCacheRef = useRef<Record<number, { items: WarehouseChatMessage[]; oldestId: number | null; hasMoreBefore: boolean; available: boolean }>>({})
   const listAbortRef = useRef<AbortController | null>(null)
+  const loadConversationsRef = useRef<((mode?: "reset" | "append" | "refresh") => Promise<void>) | null>(null)
   const messageAbortRef = useRef<AbortController | null>(null)
   const conversationListRef = useRef<HTMLDivElement | null>(null)
   const messageScrollRef = useRef<HTMLDivElement | null>(null)
@@ -309,8 +339,15 @@ export function ShippingChatPanel() {
   const loadConversations = useCallback(async (mode: "reset" | "append" | "refresh" = "reset") => {
     const append = mode === "append"
     if (append && (loadingMoreRef.current || !hasMoreConversationsRef.current)) return
+    if (mode === "refresh" && listLoadingRef.current) {
+      queuedRefreshRef.current = true
+      return
+    }
     if (append) loadingMoreRef.current = true
-    else listAbortRef.current?.abort()
+    else {
+      listAbortRef.current?.abort()
+      listLoadingRef.current = true
+    }
     const controller = new AbortController()
     listAbortRef.current = controller
     const requestId = ++listRequestRef.current
@@ -339,6 +376,12 @@ export function ShippingChatPanel() {
       conversationPageRef.current = append ? data.page : mode === "refresh" ? conversationPageRef.current : data.page
       const hasMore = merged.length < data.totalElements
       hasMoreConversationsRef.current = hasMore
+      rememberShippingConversations(conversationCacheKey, {
+        items: merged,
+        page: conversationPageRef.current,
+        totalElements: data.totalElements,
+        hasMore,
+      })
       const active = selectedRef.current
       if (active) {
         const updated = data.content.find((item) => item.id === active.id)
@@ -349,12 +392,21 @@ export function ShippingChatPanel() {
       setListError(error instanceof Error ? error.message : "No se pudieron cargar los chats")
     } finally {
       if (!controller.signal.aborted && requestId === listRequestRef.current) {
+        listLoadingRef.current = false
         setLoadingConversations(false)
         setLoadingMore(false)
         loadingMoreRef.current = false
+        if (queuedRefreshRef.current) {
+          queuedRefreshRef.current = false
+          window.setTimeout(() => void loadConversationsRef.current?.("refresh"), 0)
+        }
       }
     }
-  }, [query, selectedTagFilterId, unreadOnly])
+  }, [conversationCacheKey, query, selectedTagFilterId, unreadOnly])
+
+  useEffect(() => {
+    loadConversationsRef.current = loadConversations
+  }, [loadConversations])
 
   const loadMessages = useCallback(async (
     conversationId: number,
@@ -482,16 +534,19 @@ export function ShippingChatPanel() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      setConversations([])
-      conversationsRef.current = []
-      conversationPageRef.current = 0
-      hasMoreConversationsRef.current = false
-      void loadConversations("reset")
+      const cached = shippingConversationCache.get(conversationCacheKey)
+      const items = cached?.items ?? []
+      setConversations(items)
+      conversationsRef.current = items
+      conversationPageRef.current = cached?.page ?? 0
+      hasMoreConversationsRef.current = cached?.hasMore ?? false
+      setLoadingConversations(!cached)
+      void loadConversations(cached ? "refresh" : "reset")
     }, 0)
     return () => window.clearTimeout(timer)
   // loadConversations changes as paging state changes; a search should reset only when its value changes.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, selectedTagFilterId, unreadOnly])
+  }, [conversationCacheKey])
 
   useEffect(() => {
     const timer = window.setTimeout(() => void loadAvailableTags(), 0)
@@ -541,25 +596,115 @@ export function ShippingChatPanel() {
 
   useEffect(() => {
     const source = new EventSource("/api/crm/warehouse/events")
-    const refresh = () => {
-      if (refreshTimerRef.current != null) window.clearTimeout(refreshTimerRef.current)
-      refreshTimerRef.current = window.setTimeout(() => {
+    const pendingEvents = new Map<number, string>()
+    let eventController: AbortController | null = null
+
+    const matchesCurrentFilters = (conversation: ShippingConversation) => {
+      if (unreadOnly && (conversation.unreadCount ?? 0) <= 0) return false
+      if (selectedTagFilterId != null && !conversation.tags.some((tag) => tag.id === selectedTagFilterId)) return false
+      const term = query.trim().toLocaleLowerCase("es")
+      if (!term) return true
+      return [conversation.contactName, conversation.whatsappUsername, conversation.phoneNumber, conversation.phone]
+        .some((value) => value?.toLocaleLowerCase("es").includes(term))
+    }
+
+    const flushEvents = async () => {
+      const batch = [...pendingEvents.entries()]
+      pendingEvents.clear()
+      if (batch.length === 0) return
+      if (eventController) {
+        for (const [conversationId, type] of batch) pendingEvents.set(conversationId, type)
+        refreshTimerRef.current = window.setTimeout(() => void flushEvents(), 180)
+        return
+      }
+      if (batch.length > 8) {
         void loadConversations("refresh")
+        return
+      }
+
+      const controller = new AbortController()
+      eventController = controller
+      try {
+        const updates = new Map<number, { conversation: ShippingConversation; type: string }>()
+        await Promise.all(batch.map(async ([conversationId, type]) => {
+          const response = await authFetch(`/api/crm/whatsapp/shipping/conversations/${conversationId}`, {
+            cache: "no-store",
+            signal: controller.signal,
+          })
+          if (response.status === 403 || response.status === 404) return
+          if (!response.ok) throw new Error("No se pudo actualizar la conversación")
+          updates.set(conversationId, {
+            conversation: (await response.json()) as ShippingConversation,
+            type,
+          })
+        }))
+        if (controller.signal.aborted || updates.size === 0) return
+
+        setConversations((current) => {
+          let next = current
+          for (const { conversation, type } of updates.values()) {
+            const exists = next.some((item) => item.id === conversation.id)
+            const withoutUpdated = next.filter((item) => item.id !== conversation.id)
+            if (!matchesCurrentFilters(conversation)) {
+              next = withoutUpdated
+            } else if (type === "warehouse.message.updated" || !exists) {
+              next = [conversation, ...withoutUpdated].slice(0, Math.max(CONVERSATION_SIZE, current.length))
+            } else {
+              next = next.map((item) => item.id === conversation.id ? conversation : item)
+            }
+          }
+          conversationsRef.current = next
+          const cached = shippingConversationCache.get(conversationCacheKey)
+          rememberShippingConversations(conversationCacheKey, {
+            items: next,
+            page: conversationPageRef.current,
+            totalElements: cached?.totalElements ?? next.length,
+            hasMore: hasMoreConversationsRef.current,
+          })
+          return next
+        })
+        setSelected((current) => current ? updates.get(current.id)?.conversation ?? current : current)
+
         const active = selectedRef.current
-        if (active && newestIdRef.current != null) {
-          void loadMessages(active.id, { afterId: newestIdRef.current, preserve: true })
-        } else if (active) {
-          void loadMessages(active.id)
+        if (active && updates.get(active.id)?.type === "warehouse.message.updated") {
+          if (newestIdRef.current != null) {
+            void loadMessages(active.id, { afterId: newestIdRef.current, preserve: true })
+          } else {
+            void loadMessages(active.id)
+          }
         }
-        void loadConnection()
-      }, 180)
+      } catch {
+        if (!controller.signal.aborted) void loadConversations("refresh")
+      } finally {
+        if (eventController === controller) eventController = null
+        if (pendingEvents.size > 0) {
+          refreshTimerRef.current = window.setTimeout(() => void flushEvents(), 180)
+        }
+      }
+    }
+
+    const refresh = (rawEvent: Event) => {
+      try {
+        const payload = JSON.parse((rawEvent as MessageEvent<string>).data) as {
+          type?: string
+          conversationId?: number
+        }
+        const conversationId = Number(payload.conversationId)
+        if (!Number.isFinite(conversationId) || conversationId <= 0) return
+        pendingEvents.set(conversationId, payload.type || "warehouse.conversation.updated")
+      } catch {
+        return
+      }
+      if (refreshTimerRef.current != null) window.clearTimeout(refreshTimerRef.current)
+      refreshTimerRef.current = window.setTimeout(() => void flushEvents(), 180)
     }
     source.addEventListener("warehouse-event", refresh)
     return () => {
       source.close()
+      eventController?.abort()
       if (refreshTimerRef.current != null) window.clearTimeout(refreshTimerRef.current)
     }
-  }, [loadConnection, loadConversations, loadMessages])
+  }, [conversationCacheKey, loadConversations, loadMessages, query, selectedTagFilterId, unreadOnly])
 
   async function updateReadState(conversation: ShippingConversation, unread: boolean) {
     const previousUnreadCount = conversation.unreadCount ?? 0

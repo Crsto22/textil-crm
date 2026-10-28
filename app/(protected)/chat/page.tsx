@@ -65,7 +65,8 @@ import { AuthenticatedImageThumbnail } from "@/components/chat/AuthenticatedImag
 import type { ChatMessage, Conversation } from "@/components/chat/chat-data";
 import { ChatWallpaperLayer } from "@/components/chat/ChatWallpaperLayer";
 import { ChatConversationSkeletons, ChatMessageSkeletons } from "@/components/chat/ChatLoadingSkeletons";
-import { ChatSidebar } from "@/components/chat/ChatSidebar";
+import { ChatSidebar, type ChatSidebarPanel } from "@/components/chat/ChatSidebar";
+import type { GalleryRealtimePayload } from "@/components/chat/ConversationGalleryPanel";
 import { ShippingChatPanel } from "@/components/chat/ShippingChatPanel";
 import { Button } from "@/components/ui/button";
 import { authFetch } from "@/lib/auth/auth-fetch";
@@ -2726,6 +2727,26 @@ function SalesChatPage() {
 
     if (!event.message) return;
     const conversationId = String(event.conversationId);
+    if (
+      (event.type === "message.created" || event.type === "message.updated")
+      && !event.message.deleted
+      && event.message.mediaStoragePath
+      && event.message.mediaUrl
+    ) {
+      setGalleryRealtimeMedia({
+        conversationId,
+        item: {
+          id: event.message.id,
+          messageType: event.message.messageType,
+          mimeType: event.message.mediaMimeType ?? null,
+          fileName: event.message.mediaFileName ?? null,
+          description: event.message.body ?? null,
+          direction: event.message.direction,
+          createdAt: event.message.createdAt,
+          mediaUrl: event.message.mediaUrl,
+        },
+      });
+    }
     const mappedMessage = mapMessage(event.message);
     const existingMessages = allMessagesRef.current[conversationId] ?? [];
     const nextMessages = event.type === "message.deleted" || event.type === "message.updated"
@@ -3032,9 +3053,14 @@ function SalesChatPage() {
   };
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [sidebarPanel, setSidebarPanel] = useState<"agent" | "sale" | "purchases">("sale");
+  const [sidebarPanel, setSidebarPanel] = useState<ChatSidebarPanel>("sale");
+  const [galleryRealtimeMedia, setGalleryRealtimeMedia] = useState<GalleryRealtimePayload | null>(null);
   const openQuickSaleSidebar = () => {
     setSidebarPanel("sale");
+    setIsSidebarOpen(true);
+  };
+  const openGallerySidebar = () => {
+    setSidebarPanel("gallery");
     setIsSidebarOpen(true);
   };
 
@@ -5113,13 +5139,28 @@ function SalesChatPage() {
                   onClick={openQuickSaleSidebar}
                   disabled={!canOperateActiveConversation}
                   className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-                    isSidebarOpen
+                    isSidebarOpen && sidebarPanel === "sale"
                       ? "bg-muted text-foreground"
                       : "text-muted-foreground hover:bg-muted hover:text-foreground"
                   }`}
                   aria-label="Abrir panel de venta"
                 >
                   <ShoppingBagIcon className="h-5 w-5" />
+                </button>
+              </span>
+              <span title="Galería">
+                <button
+                  type="button"
+                  onClick={openGallerySidebar}
+                  disabled={!activeConversationId}
+                  className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                    isSidebarOpen && sidebarPanel === "gallery"
+                      ? "bg-muted text-foreground"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  }`}
+                  aria-label="Abrir galería multimedia"
+                >
+                  <PhotoIcon className="h-5 w-5" />
                 </button>
               </span>
             </div>
@@ -5923,6 +5964,7 @@ function SalesChatPage() {
             onClose={() => setIsSidebarOpen(false)}
             activePanel={sidebarPanel}
             onActivePanelChange={setSidebarPanel}
+            realtimeMedia={galleryRealtimeMedia}
           />
         </div>
       )}
@@ -5955,6 +5997,7 @@ function SalesChatPage() {
             onClose={() => setIsSidebarOpen(false)}
             activePanel={sidebarPanel}
             onActivePanelChange={setSidebarPanel}
+            realtimeMedia={galleryRealtimeMedia}
           />
         </div>
       </div>

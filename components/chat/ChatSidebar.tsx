@@ -9,6 +9,7 @@ import {
   ChevronRightIcon,
   ClipboardDocumentListIcon,
   MagnifyingGlassIcon,
+  PhotoIcon,
   ReceiptPercentIcon,
   ShoppingBagIcon,
   SparklesIcon,
@@ -25,11 +26,13 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { CrmClientForm } from "@/components/crm/CrmClientForm"
 import { authFetch } from "@/lib/auth/auth-fetch"
 import { isValidPeruvianMobile, normalizePeruvianMobile } from "@/lib/crm/phone"
+import { cn } from "@/lib/utils"
 import { CrmQuickSalePanelFlow } from "@/components/chat/CrmQuickSalePanelFlow"
 import { AgentConversationPanel } from "@/components/chat/AgentConversationPanel"
 import { CustomerPurchasesPanel } from "@/components/chat/CustomerPurchasesPanel"
+import { ConversationGalleryPanel, type GalleryRealtimePayload } from "@/components/chat/ConversationGalleryPanel"
 
-type ChatSidebarPanel = "agent" | "sale" | "purchases"
+export type ChatSidebarPanel = "agent" | "sale" | "purchases" | "gallery"
 
 type TipoDocumento = "SIN_DOC" | "DNI" | "RUC" | "CE"
 
@@ -75,6 +78,7 @@ interface ChatSidebarProps {
   isAdmin?: boolean
   activePanel?: ChatSidebarPanel
   onActivePanelChange?: (panel: ChatSidebarPanel) => void
+  realtimeMedia?: GalleryRealtimePayload | null
 }
 
 const emptyRegisterForm = {
@@ -102,7 +106,7 @@ async function readError(response: Response, fallback: string) {
   return data?.message || data?.detail || data?.error || fallback
 }
 
-export function ChatSidebar({ conversationId, clientPhone, contactName, onClose, onSaleCompleted, onClientUpdated, isAdmin = false, activePanel: controlledPanel, onActivePanelChange }: ChatSidebarProps) {
+export function ChatSidebar({ conversationId, clientPhone, contactName, onClose, onSaleCompleted, onClientUpdated, isAdmin = false, activePanel: controlledPanel, onActivePanelChange, realtimeMedia }: ChatSidebarProps) {
   const router = useRouter()
   const [internalPanel, setInternalPanel] = useState<ChatSidebarPanel>("sale")
   const [context, setContext] = useState<QuickSaleContext | null>(null)
@@ -387,6 +391,10 @@ export function ChatSidebar({ conversationId, clientPhone, contactName, onClose,
             </span>
           ) : null}
         </button>
+        <button type="button" onClick={() => setActivePanel("gallery")} className={`flex flex-1 items-center justify-center gap-1 rounded-md px-1.5 py-1.5 text-[11px] font-semibold transition ${activePanel === "gallery" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+          <PhotoIcon className="h-3.5 w-3.5" />
+          Galería
+        </button>
         <button onClick={onClose} className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-background hover:text-foreground" aria-label="Cerrar panel">
           <XMarkIcon className="h-3.5 w-3.5" />
         </button>
@@ -403,6 +411,7 @@ export function ChatSidebar({ conversationId, clientPhone, contactName, onClose,
         />
       ) : (
         <>
+      <div className={cn("min-h-0 flex-1 flex-col", activePanel === "gallery" ? "hidden" : "flex")}>
       <div className="shrink-0 border-b border-border px-3 py-2.5">
         <div className="flex items-center gap-2 rounded-xl border border-border bg-background px-2.5 py-2 shadow-sm">
           <UserIcon className="h-4 w-4 shrink-0 text-emerald-500" />
@@ -550,6 +559,10 @@ export function ChatSidebar({ conversationId, clientPhone, contactName, onClose,
           ) : null}
         </div>
       )}
+      </div>
+      {activePanel === "gallery" ? (
+        <ConversationGalleryPanel key={conversationId} conversationId={conversationId} realtimeMedia={realtimeMedia} />
+      ) : null}
         </>
       )}
 

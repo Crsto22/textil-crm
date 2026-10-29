@@ -35,6 +35,8 @@ export type WarehouseChatMessage = {
   sentByUserId?: number | null
   sentByName?: string | null
   deleted: boolean
+  location?: { latitude: number; longitude: number; name?: string | null; address?: string | null } | null
+  reactions?: Array<{ emoji: string; direction: "INCOMING" | "OUTGOING" }>
 }
 
 const WAVEFORM = [12, 20, 15, 27, 18, 31, 13, 23, 29, 17, 25, 14, 30, 19, 26, 12, 22, 29, 16, 24, 13, 28, 18, 31, 15, 22, 27, 14, 25, 18, 30, 16]
@@ -104,6 +106,11 @@ function SenderLabel({ message }: { message: WarehouseChatMessage }) {
   return <p className="mb-1 text-[10px] font-semibold text-emerald-700/80 dark:text-emerald-300/80">{label}</p>
 }
 
+function ReactionChips({ reactions }: { reactions?: WarehouseChatMessage["reactions"] }) {
+  if (!reactions?.length) return null
+  return <div className="mt-1 flex flex-wrap gap-1" aria-label="Reacciones del mensaje">{reactions.map((reaction, index) => <span key={`${reaction.direction}-${reaction.emoji}-${index}`} title={reaction.direction === "OUTGOING" ? "Reacción enviada" : "Reacción recibida"} className="rounded-full border border-border bg-background/90 px-2 py-0.5 text-sm shadow-sm">{reaction.emoji}</span>)}</div>
+}
+
 function AudioMessage({ message, outgoing }: { message: WarehouseChatMessage; outgoing: boolean }) {
   const audioRef = useRef<HTMLAudioElement>(null)
   const [requested, setRequested] = useState(false)
@@ -146,6 +153,7 @@ function AudioMessage({ message, outgoing }: { message: WarehouseChatMessage; ou
       <div className={cn("w-fit max-w-[88%] rounded-md px-3 py-3 text-sm shadow-sm md:max-w-[55%]", outgoing ? "whatsapp-outgoing-bubble ml-auto" : "mr-auto border border-border bg-card text-card-foreground")}>
         <SenderLabel message={message} />
         <div className="flex items-center gap-3 text-muted-foreground"><MicrophoneIcon className="h-6 w-6" /><span>Audio histórico no disponible</span></div>
+        <ReactionChips reactions={message.reactions} />
         <p className={cn("mt-1 flex items-center justify-end gap-1 text-[10px]", outgoing ? "whatsapp-outgoing-meta" : "text-muted-foreground")}>{chatTime(message.createdAt)} {outgoing && <MessageStatusChecks status={message.status} />}</p>
       </div>
     )
@@ -166,6 +174,7 @@ function AudioMessage({ message, outgoing }: { message: WarehouseChatMessage; ou
         <span className="w-10 text-right text-xs font-medium">{knownDuration ? duration(knownDuration) : "--:--"}</span>
       </div>
       {media.failed && <button type="button" onClick={media.retry} className="mt-2 flex items-center gap-1 text-xs text-red-500"><ArrowPathIcon className="h-3.5 w-3.5" /> Reintentar</button>}
+      <ReactionChips reactions={message.reactions} />
       <p className={cn("mt-1 flex items-center justify-end gap-1 text-[10px]", outgoing ? "whatsapp-outgoing-meta" : "text-muted-foreground")}>{chatTime(message.createdAt)} {outgoing && <MessageStatusChecks status={message.status} />}</p>
     </div>
   )
@@ -220,6 +229,22 @@ export function WarehouseMessageBubble({ message }: { message: WarehouseChatMess
     )
   }
 
+  if (message.location) {
+    const location = message.location
+    const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${location.latitude},${location.longitude}`)}`
+    return <div className={cn("w-fit max-w-[88%] rounded-md px-3 py-3 text-sm shadow-sm md:max-w-[55%]", outgoing ? "whatsapp-outgoing-bubble ml-auto" : "mr-auto bg-card text-card-foreground")}>
+      <SenderLabel message={message} />
+      <div className="rounded-lg border border-current/10 bg-black/5 p-3 dark:bg-white/5">
+        <p className="font-semibold">{location.name || "Ubicación compartida"}</p>
+        {location.address ? <p className="mt-1 text-xs opacity-75">{location.address}</p> : null}
+        <p className="mt-1 text-[11px] opacity-60">{location.latitude.toFixed(6)}, {location.longitude.toFixed(6)}</p>
+        <a href={mapsUrl} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex text-xs font-semibold text-emerald-700 hover:underline dark:text-emerald-300">Abrir en Google Maps</a>
+      </div>
+      <ReactionChips reactions={message.reactions} />
+      <p className={cn("mt-2 flex items-center justify-end gap-1 text-[10px]", outgoing ? "whatsapp-outgoing-meta" : "text-muted-foreground")}>{chatTime(message.createdAt)} {outgoing && <MessageStatusChecks status={message.status} />}</p>
+    </div>
+  }
+
   if (isAudio) return <AudioMessage message={message} outgoing={outgoing} />
 
   return <>
@@ -246,6 +271,7 @@ export function WarehouseMessageBubble({ message }: { message: WarehouseChatMess
       ) : null}
       {message.body && message.body !== message.mediaFileName && !message.deleted && <p className={cn("whitespace-pre-wrap break-words leading-relaxed", message.mediaUrl && "px-1 pt-2")}>{message.body}</p>}
       {media.failed && <button type="button" onClick={media.retry} className="m-2 flex items-center gap-1 text-xs text-red-500"><ArrowPathIcon className="h-3.5 w-3.5" /> Reintentar</button>}
+      <ReactionChips reactions={message.reactions} />
       <p className={cn("mt-1 flex items-center justify-end gap-1 px-1 text-[10px]", outgoing ? "whatsapp-outgoing-meta" : "text-muted-foreground")}>{chatTime(message.createdAt)} {outgoing && <MessageStatusChecks status={message.status} />}</p>
     </div>
     {imagePreviewOpen && media.url && typeof document !== "undefined" ? createPortal(

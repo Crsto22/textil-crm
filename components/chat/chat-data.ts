@@ -13,7 +13,7 @@ export type MessageQuote = {
   id: string;
   direction: "INCOMING" | "OUTGOING" | "SYSTEM";
   body: string;
-  messageType: "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "DOCUMENT" | "MEDIA" | "STICKER" | "VIEW_ONCE";
+  messageType: "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "DOCUMENT" | "MEDIA" | "STICKER" | "VIEW_ONCE" | "LOCATION" | "UNSUPPORTED";
   deleted?: boolean;
 };
 
@@ -49,6 +49,8 @@ export type ChatMessage = {
   relatedSaleId?: number | null;
   sticker?: boolean;
   viewOnce?: boolean;
+  location?: { latitude: number; longitude: number; name?: string | null; address?: string | null } | null;
+  reactions?: Array<{ emoji: string; direction: "INCOMING" | "OUTGOING" }>;
 };
 
 export const conversations: Conversation[] = [];

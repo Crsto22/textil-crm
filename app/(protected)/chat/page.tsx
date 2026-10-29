@@ -194,7 +194,7 @@ interface CrmMessageResponse {
   id: number;
   direction: "INCOMING" | "OUTGOING" | "SYSTEM";
   origin?: "EXTERNAL" | "HUMAN" | "CRM_SYSTEM" | "CRM_ACTIVITY" | "AI_KIMENTS";
-  messageType: "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "DOCUMENT" | "MEDIA" | "STICKER" | "VIEW_ONCE";
+  messageType: "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "DOCUMENT" | "MEDIA" | "STICKER" | "VIEW_ONCE" | "LOCATION" | "UNSUPPORTED";
   body: string | null;
   status: ChatMessage["status"];
   createdAt: string | null;
@@ -206,13 +206,15 @@ interface CrmMessageResponse {
     id: number;
     direction: "INCOMING" | "OUTGOING" | "SYSTEM";
     body: string | null;
-    messageType: "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "DOCUMENT" | "MEDIA" | "STICKER" | "VIEW_ONCE";
+    messageType: "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "DOCUMENT" | "MEDIA" | "STICKER" | "VIEW_ONCE" | "LOCATION" | "UNSUPPORTED";
     deleted?: boolean;
   } | null;
   deleted?: boolean;
   relatedSaleId?: number | null;
   sentByUserId?: number | null;
   sentByName?: string | null;
+  location?: { latitude: number; longitude: number; name?: string | null; address?: string | null } | null;
+  reactions?: Array<{ emoji: string; direction: "INCOMING" | "OUTGOING" }>;
 }
 
 interface MessagePageResponse {
@@ -386,7 +388,8 @@ const mapMessage = (
 
   const isViewOnce = message.messageType === "VIEW_ONCE";
   const isSticker = message.messageType === "STICKER";
-  const hasMedia = !isViewOnce && Boolean(message.mediaUrl || message.mediaFileName || message.messageType !== "TEXT");
+  const hasMedia = !isViewOnce && Boolean(message.mediaUrl || message.mediaFileName
+    || ["IMAGE", "VIDEO", "AUDIO", "DOCUMENT", "MEDIA", "STICKER"].includes(message.messageType));
   const isAudioContent =
     message.messageType === "AUDIO" ||
     isAudioFile(message.mediaMimeType || undefined, message.mediaFileName || undefined);
@@ -435,6 +438,8 @@ const mapMessage = (
     sentByName: message.sentByName ?? null,
     sticker: isSticker,
     viewOnce: isViewOnce,
+    location: message.location ?? null,
+    reactions: message.reactions ?? [],
   };
 };
 
@@ -1448,6 +1453,25 @@ function MessageBubble({
     );
   }
 
+  if (item.location) {
+    const outgoing = item.type === "outgoing";
+    const location = item.location;
+    const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${location.latitude},${location.longitude}`)}`;
+    return (
+      <div className={cn("w-fit max-w-[88%] rounded-md px-3 py-3 text-sm shadow-sm md:max-w-[55%]", outgoing ? "whatsapp-outgoing-bubble ml-auto" : "mr-auto bg-card text-card-foreground")}>
+        {outgoing && <MessageSenderLabel item={item} />}
+        <div className="rounded-lg border border-current/10 bg-black/5 p-3 dark:bg-white/5">
+          <p className="font-semibold">{location.name || "Ubicación compartida"}</p>
+          {location.address ? <p className="mt-1 text-xs opacity-75">{location.address}</p> : null}
+          <p className="mt-1 text-[11px] opacity-60">{location.latitude.toFixed(6)}, {location.longitude.toFixed(6)}</p>
+          <a href={mapsUrl} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex text-xs font-semibold text-emerald-700 hover:underline dark:text-emerald-300">Abrir en Google Maps</a>
+        </div>
+        <MessageReactions reactions={item.reactions} />
+        <p className={cn("mt-2 flex items-center justify-end gap-1 text-[10px]", outgoing ? "whatsapp-outgoing-meta" : "text-muted-foreground")}>{item.time}{outgoing && <MessageStatusChecks status={item.status} />}</p>
+      </div>
+    );
+  }
+
   if (item.type === "outgoing-file" || item.type === "incoming-file") {
     const isOutgoingFile = item.type === "outgoing-file";
     const isImageAttachment = isImageFile(item.fileType, item.text) && item.fileUrl;
@@ -1626,6 +1650,7 @@ function MessageBubble({
             ) : null}
           </>
         )}
+        <MessageReactions reactions={item.reactions} />
         <p className={`flex items-center justify-end gap-1 text-[10px] ${
           isOutgoingFile ? "whatsapp-outgoing-meta" : "text-muted-foreground"
         } ${isImageAttachment ? "mt-1 px-1" : "mt-2"}`}>
@@ -1717,6 +1742,7 @@ function MessageBubble({
             </span>
           </div>
         </div>
+        <MessageReactions reactions={item.reactions} />
         <p className={cn(
           "mt-2 flex items-center justify-end gap-1 text-[10px] md:mt-1",
           isOutgoingAudio ? "desktop-audio-time whatsapp-outgoing-meta" : "text-muted-foreground",
@@ -1752,6 +1778,7 @@ function MessageBubble({
           <p className="min-w-0 whitespace-pre-wrap break-words">{item.text}</p>
           <MessageActions item={item} onReply={onReply} onDelete={onDelete} deleting={deleting} allowDelete={canDelete} />
         </div>
+        <MessageReactions reactions={item.reactions} />
         <p className="whatsapp-outgoing-meta mt-4 flex items-center justify-end gap-1 text-[10px]">
           {item.status === "accepted" ? "Enviando..." : item.time}
           {item.status === "failed" ? (
@@ -1777,7 +1804,19 @@ function MessageBubble({
         <p className="min-w-0 whitespace-pre-wrap break-words">{item.text}</p>
         <MessageActions item={item} onReply={onReply} onDelete={onDelete} deleting={deleting} allowDelete={canDelete} />
       </div>
+      <MessageReactions reactions={item.reactions} />
       <p className="mt-4 text-right text-[10px] text-muted-foreground">{item.time}</p>
+    </div>
+  );
+}
+
+function MessageReactions({ reactions }: { reactions?: ChatMessage["reactions"] }) {
+  if (!reactions?.length) return null;
+  return (
+    <div className="mt-1 flex flex-wrap gap-1" aria-label="Reacciones del mensaje">
+      {reactions.map((reaction, index) => (
+        <span key={`${reaction.direction}-${reaction.emoji}-${index}`} className="rounded-full border border-border bg-background/90 px-2 py-0.5 text-sm shadow-sm" title={reaction.direction === "OUTGOING" ? "Reacción enviada" : "Reacción recibida"}>{reaction.emoji}</span>
+      ))}
     </div>
   );
 }
@@ -2749,7 +2788,9 @@ function SalesChatPage() {
     }
     const mappedMessage = mapMessage(event.message);
     const existingMessages = allMessagesRef.current[conversationId] ?? [];
-    const nextMessages = event.type === "message.deleted" || event.type === "message.updated"
+    const nextMessages = event.type === "message.deleted" || event.message.deleted
+      ? existingMessages.filter((message) => message.id !== mappedMessage.id)
+      : event.type === "message.updated"
       ? existingMessages.map((message) => message.id === mappedMessage.id ? mappedMessage : message)
       : Array.from(new Map([...existingMessages, mappedMessage].map((message) => [message.id, message])).values());
     const previousMeta = messageCacheMetaRef.current[conversationId];

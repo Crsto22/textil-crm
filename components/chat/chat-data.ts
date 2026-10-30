@@ -49,6 +49,7 @@ export type ChatMessage = {
   relatedSaleId?: number | null;
   sticker?: boolean;
   viewOnce?: boolean;
+  unsupported?: boolean;
   location?: { latitude: number; longitude: number; name?: string | null; address?: string | null } | null;
   reactions?: Array<{ emoji: string; direction: "INCOMING" | "OUTGOING" }>;
 };

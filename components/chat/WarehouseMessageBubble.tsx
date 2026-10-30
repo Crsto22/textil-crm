@@ -7,6 +7,7 @@ import {
   ArrowPathIcon,
   CheckIcon,
   DocumentIcon,
+  ExclamationTriangleIcon,
   MicrophoneIcon,
   PauseIcon,
   PhotoIcon,
@@ -241,6 +242,21 @@ export function WarehouseMessageBubble({ message }: { message: WarehouseChatMess
         <a href={mapsUrl} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex text-xs font-semibold text-emerald-700 hover:underline dark:text-emerald-300">Abrir en Google Maps</a>
       </div>
       <ReactionChips reactions={message.reactions} />
+      <p className={cn("mt-2 flex items-center justify-end gap-1 text-[10px]", outgoing ? "whatsapp-outgoing-meta" : "text-muted-foreground")}>{chatTime(message.createdAt)} {outgoing && <MessageStatusChecks status={message.status} />}</p>
+    </div>
+  }
+
+  if (message.messageType === "UNSUPPORTED") {
+    return <div className={cn("w-fit max-w-[88%] rounded-md px-3 py-3 text-sm shadow-sm md:max-w-[55%]", outgoing ? "whatsapp-outgoing-bubble ml-auto" : "mr-auto bg-card text-card-foreground")}>
+      <SenderLabel message={message} />
+      <div className="flex items-start gap-2.5">
+        <ExclamationTriangleIcon className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
+        <div>
+          <p className="font-semibold">Contenido de WhatsApp</p>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Este tipo de contenido todavía no puede mostrarse en el CRM. Revísalo en WhatsApp para verlo.</p>
+          <p className="mt-1 text-xs text-muted-foreground">Puedes responder normalmente desde el cuadro inferior.</p>
+        </div>
+      </div>
       <p className={cn("mt-2 flex items-center justify-end gap-1 text-[10px]", outgoing ? "whatsapp-outgoing-meta" : "text-muted-foreground")}>{chatTime(message.createdAt)} {outgoing && <MessageStatusChecks status={message.status} />}</p>
     </div>
   }

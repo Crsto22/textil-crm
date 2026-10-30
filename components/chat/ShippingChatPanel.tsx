@@ -688,9 +688,25 @@ export function ShippingChatPanel() {
         const payload = JSON.parse((rawEvent as MessageEvent<string>).data) as {
           type?: string
           conversationId?: number
+          messageId?: number
+          status?: string
         }
         const conversationId = Number(payload.conversationId)
         if (!Number.isFinite(conversationId) || conversationId <= 0) return
+        if (payload.type === "warehouse.message.status.updated") {
+          const messageId = Number(payload.messageId)
+          const status = payload.status?.toLowerCase()
+          if (!Number.isFinite(messageId) || messageId <= 0 || !status) return
+          const cached = messageCacheRef.current[conversationId]
+          if (cached) {
+            const items = cached.items.map((message) => message.id === messageId ? { ...message, status } : message)
+            messageCacheRef.current[conversationId] = { ...cached, items }
+          }
+          if (selectedRef.current?.id === conversationId) {
+            setMessages((current) => current.map((message) => message.id === messageId ? { ...message, status } : message))
+          }
+          return
+        }
         pendingEvents.set(conversationId, payload.type || "warehouse.conversation.updated")
       } catch {
         return

@@ -438,6 +438,7 @@ const mapMessage = (
     sentByName: message.sentByName ?? null,
     sticker: isSticker,
     viewOnce: isViewOnce,
+    unsupported: message.messageType === "UNSUPPORTED",
     location: message.location ?? null,
     reactions: message.reactions ?? [],
   };
@@ -1202,6 +1203,7 @@ function MessageActions({
   allowDelete?: boolean;
 }) {
   const canShow = !item.deleted
+    && !item.unsupported
     && item.type !== "date"
     && item.type !== "system"
     && item.status !== "accepted"
@@ -1430,6 +1432,33 @@ function MessageBubble({
         Mensaje eliminado
         <p className={`mt-2 text-right text-[10px] ${outgoing ? "whatsapp-outgoing-meta" : "text-muted-foreground"}`}>
           {item.time}
+        </p>
+      </div>
+    );
+  }
+
+  if (item.unsupported) {
+    const outgoing = item.type === "outgoing";
+    return (
+      <div className={cn(
+        "w-fit max-w-[88%] rounded-md px-3 py-3 text-sm shadow-sm md:max-w-[55%]",
+        outgoing ? "whatsapp-outgoing-bubble ml-auto" : "mr-auto bg-card text-card-foreground",
+      )}>
+        {outgoing && <MessageSenderLabel item={item} />}
+        <div className="flex items-start gap-2.5">
+          <ExclamationTriangleIcon className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
+          <div>
+            <p className="font-semibold">Contenido de WhatsApp</p>
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              Este tipo de contenido todavía no puede mostrarse en el CRM. Revísalo en WhatsApp para verlo.
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Puedes responder normalmente desde el cuadro inferior.
+            </p>
+          </div>
+        </div>
+        <p className={cn("mt-2 flex items-center justify-end gap-1 text-[10px]", outgoing ? "whatsapp-outgoing-meta" : "text-muted-foreground")}>
+          {item.time} {outgoing && <MessageStatusChecks status={item.status} />}
         </p>
       </div>
     );

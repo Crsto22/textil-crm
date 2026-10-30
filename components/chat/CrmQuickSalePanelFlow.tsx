@@ -858,7 +858,7 @@ export function CrmQuickSalePanelFlow({
               />
             </div>
             <p className="text-[11px] text-slate-400">
-              Primero se buscara el celular en el CRM. Si no existe, se creara como {backupName.trim() || `CLIENTE (${normalizePeruvianMobile(backupPhone) || "..."})`}.
+              Primero se buscara el celular en el CRM. Si no existe, se creara como {backupName.trim() || `CLIENTE ${normalizePeruvianMobile(backupPhone) || "..."}`}.
             </p>
           </div>
           <DialogFooter className="gap-2 border-t border-slate-100 px-4 py-3 dark:border-slate-700/60">
